@@ -9,37 +9,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-import torch
-
 from .game import GomokuState
 from .mcts import MCTS, MCTSConfig, visit_count_policy
-from .model import PolicyValueNet, build_model_from_config
-
-
-def resolve_device(device: str) -> str:
-    if device == "auto":
-        return "cuda" if torch.cuda.is_available() else "cpu"
-    if device.startswith("cuda") and not torch.cuda.is_available():
-        raise RuntimeError("CUDA was requested, but this Python environment cannot see it")
-    return device
-
-
-def load_model(checkpoint: Path, device: str) -> tuple[PolicyValueNet, dict]:
-    try:
-        payload = torch.load(checkpoint, map_location=device, weights_only=False)
-    except TypeError:
-        payload = torch.load(checkpoint, map_location=device)
-    cfg = payload.get("config", {})
-    model = build_model_from_config(cfg).to(device)
-    model.load_state_dict(payload["model"])
-    model.eval()
-    return model, cfg
+from .utils import load_model, resolve_device
 
 
 class GameSession:
     def __init__(
         self,
-        model: PolicyValueNet,
+        model,
         cfg: dict,
         device: str,
         simulations: int,
@@ -59,7 +37,40 @@ class GameSession:
         self.last_ai_policy: list[dict] = []
         self.policy_source = "none"
         self.policy_player: int | None = None
-        self.undo_stack: list[tuple[GomokuState, list[dict], list[dict], str, int | None]] = []
+        self.undo_stack: list[tuple] = []
+        # reuse a single MCTS object; its model ref is stable
+        self._mcts = self._make_mcts(simulations)
+
+    def _make_mcts(self, simulations: int) -> MCTS:
+        amp_dtype = str(
+            self.cfg.get(
+                "mcts_amp_dtype",
+                str(self.cfg.get("amp_dtype", "bf16"))
+                if bool(self.cfg.get("amp", True))
+                else "none",
+            )
+        )
+        return MCTS(
+            self.model,
+            MCTSConfig(
+                simulations=simulations,
+                c_puct=float(self.cfg.get("mcts_c_puct", 1.5)),
+                dirichlet_alpha=float(self.cfg.get("mcts_dirichlet_alpha", 0.3)),
+                dirichlet_fraction=float(self.cfg.get("mcts_dirichlet_fraction", 0.25)),
+                eval_batch_size=min(
+                    int(self.cfg.get("mcts_batch_size", 16)),
+                    max(1, simulations),
+                ),
+                amp_dtype=amp_dtype,
+            ),
+            device=self.device,
+        )
+
+    def set_simulations(self, simulations: int) -> None:
+        simulations = max(1, int(simulations))
+        if simulations != self.simulations:
+            self.simulations = simulations
+            self._mcts = self._make_mcts(simulations)
 
     def new_game(self, human: str = "black", simulations: int | None = None) -> dict:
         self.state = GomokuState.new(
@@ -77,9 +88,6 @@ class GameSession:
             self._ai_move()
         return self.snapshot()
 
-    def set_simulations(self, simulations: int) -> None:
-        self.simulations = max(1, int(simulations))
-
     def human_move(self, row: int, col: int, simulations: int | None = None) -> dict:
         if simulations is not None:
             self.set_simulations(simulations)
@@ -88,13 +96,13 @@ class GameSession:
         if self.state.current_player != self.human_player:
             raise ValueError("it is not the human player's turn")
         action = self.state.coord_to_action(row, col)
-        if action not in set(map(int, self.state.legal_actions())):
+        if not self.state.legal_mask()[action]:
             raise ValueError("that point is already occupied")
         self.undo_stack.append(
             (
                 self.state,
-                [dict(item) for item in self.history],
-                [dict(item) for item in self.last_ai_policy],
+                list(self.history),
+                list(self.last_ai_policy),
                 self.policy_source,
                 self.policy_player,
             )
@@ -157,50 +165,22 @@ class GameSession:
         )
 
     def _search_policy(self) -> tuple[int, list[dict]]:
-        mcts = MCTS(
-            self.model,
-            MCTSConfig(
-                simulations=self.simulations,
-                c_puct=float(self.cfg.get("mcts_c_puct", 1.5)),
-                dirichlet_alpha=float(self.cfg.get("mcts_dirichlet_alpha", 0.3)),
-                dirichlet_fraction=float(self.cfg.get("mcts_dirichlet_fraction", 0.25)),
-                eval_batch_size=min(
-                    int(self.cfg.get("mcts_batch_size", 16)),
-                    max(1, self.simulations),
-                ),
-                amp_dtype=str(
-                    self.cfg.get(
-                        "mcts_amp_dtype",
-                        (
-                            str(self.cfg.get("amp_dtype", "bf16"))
-                            if bool(self.cfg.get("amp", True))
-                            else "none"
-                        ),
-                    )
-                ),
-            ),
-            device=self.device,
-        )
-        root = mcts.search(self.state, add_exploration_noise=False)
-        policy = visit_count_policy(root, self.state.action_size, temperature=0.0)
-        action = int(policy.argmax())
+        root = self._mcts.search(self.state, add_exploration_noise=False)
         if not root.children:
             return -1, []
-        ranked = sorted(
-            ((int(action_id), float(child.visit_count)) for action_id, child in root.children.items()),
-            key=lambda item: item[1],
-            reverse=True,
-        )[:8]
-        total_visits = sum(float(child.visit_count) for child in root.children.values()) or 1.0
+        policy = visit_count_policy(root, self.state.action_size, temperature=0.0)
+        action = int(policy.argmax())
+        total_visits = sum(float(c.visit_count) for c in root.children.values()) or 1.0
+        ranked = sorted(root.children.items(), key=lambda kv: kv[1].visit_count, reverse=True)[:8]
         policy_rows = [
             {
-                "row": self.state.action_to_coord(action_id)[0],
-                "col": self.state.action_to_coord(action_id)[1],
-                "visits": visits,
-                "share": visits / total_visits,
-                "selected": action_id == action,
+                "row": self.state.action_to_coord(a)[0],
+                "col": self.state.action_to_coord(a)[1],
+                "visits": float(c.visit_count),
+                "share": float(c.visit_count) / total_visits,
+                "selected": a == action,
             }
-            for action_id, visits in ranked
+            for a, c in ranked
         ]
         return action, policy_rows
 
@@ -227,12 +207,8 @@ class GameSession:
         if self.state.winner == 0:
             return "Draw"
         if self.state.winner is not None:
-            if self.state.winner == self.human_player:
-                return "You win"
-            return "AI wins"
-        if self.state.current_player == self.human_player:
-            return "Your turn"
-        return "AI turn"
+            return "You win" if self.state.winner == self.human_player else "AI wins"
+        return "Your turn" if self.state.current_player == self.human_player else "AI turn"
 
 
 class WebPlayHandler(BaseHTTPRequestHandler):
@@ -319,8 +295,11 @@ class WebPlayHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def log_message(self, format: str, *args: object) -> None:
-        return
+    def log_message(self, fmt: str, *args: object) -> None:
+        # only surface 4xx/5xx to avoid spamming normal requests
+        if args and str(args[1]).startswith(("4", "5")):
+            import sys
+            print(fmt % args, file=sys.stderr)
 
 
 def build_parser() -> argparse.ArgumentParser:

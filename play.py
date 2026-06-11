@@ -3,31 +3,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import torch
-
 from .game import GomokuState
 from .mcts import MCTS, MCTSConfig, visit_count_policy
-from .model import PolicyValueNet, build_model_from_config
-
-
-def resolve_device(device: str) -> str:
-    if device == "auto":
-        return "cuda" if torch.cuda.is_available() else "cpu"
-    if device == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("CUDA was requested, but this Python environment cannot see it")
-    return device
-
-
-def load_model(checkpoint: Path, device: str) -> tuple[PolicyValueNet, dict]:
-    try:
-        payload = torch.load(checkpoint, map_location=device, weights_only=False)
-    except TypeError:
-        payload = torch.load(checkpoint, map_location=device)
-    cfg = payload.get("config", {})
-    model = build_model_from_config(cfg).to(device)
-    model.load_state_dict(payload["model"])
-    model.eval()
-    return model, cfg
+from .utils import load_model, resolve_device
 
 
 def parse_move(raw: str, state: GomokuState) -> int:
@@ -36,7 +14,7 @@ def parse_move(raw: str, state: GomokuState) -> int:
         raise ValueError("enter row and column, for example: 5 6")
     row, col = int(parts[0]) - 1, int(parts[1]) - 1
     action = state.coord_to_action(row, col)
-    if action not in set(map(int, state.legal_actions())):
+    if not state.legal_mask()[action]:
         raise ValueError("that point is already occupied")
     return action
 

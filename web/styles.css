@@ -273,6 +273,10 @@ input[type="range"] {
   gap: 10px;
 }
 
+.actions .primary {
+  grid-column: 1 / -1;
+}
+
 .primary,
 .secondary {
   min-height: 40px;

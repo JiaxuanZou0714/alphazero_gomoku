@@ -7,8 +7,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import torch
-from torch.nn import functional as F
-
 from .game import GomokuState
 from .model import PolicyValueNet
 from .torch_compat import tensor_from_array
@@ -130,31 +128,29 @@ class MCTS:
             dtype=torch.float32,
             device=self.device,
         )
-        legal_masks = [state.legal_mask() for state in states]
+        # stack legal masks into one array for vectorised masking
+        legal_masks_np = np.stack([state.legal_mask() for state in states])  # (N, A)
 
         autocast_ctx = self._autocast_context()
         with torch.inference_mode(), autocast_ctx:
             logits_batch, values_batch = self.model(encoded)
-            logits_batch = logits_batch.float().cpu()
-            logits_batch = torch.nan_to_num(logits_batch, nan=0.0, posinf=0.0, neginf=0.0)
+            logits_np = torch.nan_to_num(
+                logits_batch.float(), nan=0.0, posinf=0.0, neginf=0.0
+            ).cpu().numpy()  # (N, A)
             values = torch.nan_to_num(
                 values_batch.float(), nan=0.0, posinf=1.0, neginf=-1.0
             ).clamp(-1.0, 1.0).cpu().tolist()
 
-        results: list[tuple[np.ndarray, float]] = []
-        for logits, legal_mask_np, value in zip(logits_batch, legal_masks, values):
-            masked_logits = torch.full_like(logits, -1.0e9)
-            legal_mask = tensor_from_array(legal_mask_np, dtype=torch.bool)
-            masked_logits[legal_mask] = logits[legal_mask]
-            probs = np.array(F.softmax(masked_logits, dim=0).tolist(), dtype=np.float32)
-            probs[~legal_mask_np] = 0.0
-            total = float(probs.sum())
-            if total <= 0.0:
-                probs[legal_mask_np] = 1.0 / max(1, int(legal_mask_np.sum()))
-            else:
-                probs /= total
-            results.append((probs, float(value)))
-        return results
+        # mask illegal actions and compute softmax entirely in numpy
+        logits_np[~legal_masks_np] = -1.0e9
+        logits_np -= logits_np.max(axis=1, keepdims=True)  # numerical stability
+        exp = np.exp(logits_np)
+        exp[~legal_masks_np] = 0.0
+        totals = exp.sum(axis=1, keepdims=True)
+        uniform_fallback = legal_masks_np.sum(axis=1, keepdims=True).clip(min=1)
+        probs_batch = np.where(totals > 0, exp / totals, legal_masks_np / uniform_fallback)
+
+        return [(probs_batch[i].astype(np.float32), float(values[i])) for i in range(len(states))]
 
     def _autocast_context(self) -> object:
         if self.device.type != "cuda" or self.config.amp_dtype == "none":

@@ -13,6 +13,8 @@ const policyList = document.querySelector("#policyList");
 const policyCount = document.querySelector("#policyCount");
 const toast = document.querySelector("#toast");
 const newGameBtn = document.querySelector("#newGame");
+const undoBtn = document.querySelector("#undo");
+const analyzeBtn = document.querySelector("#analyze");
 const refreshBtn = document.querySelector("#refresh");
 const sideButtons = [...document.querySelectorAll(".segment")];
 
@@ -36,14 +38,14 @@ function showToast(message) {
   toast.textContent = message;
   toast.hidden = false;
   window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => {
-    toast.hidden = true;
-  }, 2800);
+  showToast.timer = window.setTimeout(() => { toast.hidden = true; }, 2800);
 }
 
 function setBusy(nextBusy) {
   busy = nextBusy;
   newGameBtn.disabled = busy;
+  undoBtn.disabled = busy;
+  analyzeBtn.disabled = busy;
   refreshBtn.disabled = busy;
   boardEl.classList.toggle("busy", busy);
   if (busy) {
@@ -58,9 +60,7 @@ async function request(path, options = {}) {
     ...options,
   });
   const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(payload.error || "Request failed");
-  }
+  if (!response.ok) throw new Error(payload.error || "Request failed");
   return payload;
 }
 
@@ -72,12 +72,10 @@ function buildBoard(size) {
     const col = document.createElement("div");
     col.textContent = i + 1;
     colCoords.appendChild(col);
-
     const row = document.createElement("div");
     row.textContent = i + 1;
     rowCoords.appendChild(row);
   }
-
   for (let row = 0; row < size; row += 1) {
     for (let col = 0; col < size; col += 1) {
       const cell = document.createElement("button");
@@ -115,12 +113,8 @@ function render(nextState) {
       cell.appendChild(stone);
       cell.classList.add("disabled");
     }
-    if (!isHumanTurn || value !== 0 || busy) {
-      cell.classList.add("disabled");
-    }
-    if (last && row === last.row && col === last.col) {
-      cell.classList.add("last");
-    }
+    if (!isHumanTurn || value !== 0 || busy) cell.classList.add("disabled");
+    if (last && row === last.row && col === last.col) cell.classList.add("last");
   });
 
   movesEl.textContent = state.movesPlayed;
@@ -130,6 +124,9 @@ function render(nextState) {
   sideLabel.textContent = playerName(state.humanPlayer);
   statusPill.textContent = state.status;
   statusPill.className = `status-pill ${state.winner !== null ? "done" : ""}`;
+
+  // undo only meaningful when moves exist and game not over
+  undoBtn.disabled = !state.canUndo || !!state.winner;
 
   historyCount.textContent = state.history.length;
   historyList.innerHTML = "";
@@ -144,55 +141,59 @@ function render(nextState) {
   state.aiPolicy.forEach((entry, index) => {
     const item = document.createElement("li");
     const percent = Math.round(entry.share * 100);
-    item.innerHTML = `<span>${index + 1}. ${entry.row + 1},${entry.col + 1}</span><span>${percent}%</span>`;
+    item.innerHTML = `<span>${index + 1}. ${entry.row + 1},${entry.col + 1}</span><span>${percent}%${entry.selected ? " ✓" : ""}</span>`;
     policyList.appendChild(item);
   });
 }
 
 async function refresh() {
-  try {
-    render(await request("/api/state"));
-  } catch (error) {
-    showToast(error.message);
-  }
+  try { render(await request("/api/state")); }
+  catch (error) { showToast(error.message); }
 }
 
 async function newGame() {
   try {
     setBusy(true);
-    const payload = await request("/api/new", {
+    render(await request("/api/new", {
       method: "POST",
-      body: JSON.stringify({
-        human: selectedSide,
-        simulations: Number(simSlider.value),
-      }),
-    });
-    render(payload);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setBusy(false);
-  }
+      body: JSON.stringify({ human: selectedSide, simulations: Number(simSlider.value) }),
+    }));
+  } catch (error) { showToast(error.message); }
+  finally { setBusy(false); }
 }
 
 async function makeMove(row, col) {
-  if (busy || !state || state.winner !== null || state.currentPlayer !== state.humanPlayer) {
-    return;
-  }
+  if (busy || !state || state.winner !== null || state.currentPlayer !== state.humanPlayer) return;
   if (state.board[row][col] !== 0) return;
-
   try {
     setBusy(true);
-    const payload = await request("/api/move", {
+    render(await request("/api/move", {
       method: "POST",
       body: JSON.stringify({ row, col }),
-    });
-    render(payload);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setBusy(false);
-  }
+    }));
+  } catch (error) { showToast(error.message); }
+  finally { setBusy(false); }
+}
+
+async function undo() {
+  if (busy) return;
+  try {
+    setBusy(true);
+    render(await request("/api/undo", { method: "POST", body: "{}" }));
+  } catch (error) { showToast(error.message); }
+  finally { setBusy(false); }
+}
+
+async function analyze() {
+  if (busy || !state || state.winner !== null) return;
+  try {
+    setBusy(true);
+    render(await request("/api/analyze", {
+      method: "POST",
+      body: JSON.stringify({ simulations: Number(simSlider.value) }),
+    }));
+  } catch (error) { showToast(error.message); }
+  finally { setBusy(false); }
 }
 
 sideButtons.forEach((button) => {
@@ -203,15 +204,13 @@ sideButtons.forEach((button) => {
   });
 });
 
-simSlider.addEventListener("input", () => {
-  simValue.textContent = simSlider.value;
-});
+simSlider.addEventListener("input", () => { simValue.textContent = simSlider.value; });
 
 newGameBtn.addEventListener("click", newGame);
+undoBtn.addEventListener("click", undo);
+analyzeBtn.addEventListener("click", analyze);
 refreshBtn.addEventListener("click", refresh);
 
 refresh().then(() => {
-  if (!state || state.movesPlayed === 0) {
-    newGame();
-  }
+  if (!state || state.movesPlayed === 0) newGame();
 });
