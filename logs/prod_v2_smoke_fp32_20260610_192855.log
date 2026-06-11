@@ -1,0 +1,41 @@
+device=cuda
+training_data_parallel=[0, 1, 2, 3]
+self_play_workers=16 self_play_devices=['cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']
+config preset=a100-4 iterations=1 games_per_iteration=16 simulations=16 mcts_batch_size=8 epochs=1 train_steps_per_iteration=2 batch_size=2048 replay_size=500000 lr=0.0002 min_lr=2e-05 lr_schedule=cosine warmup_iterations=5 mcts_c_puct=1.25 dirichlet_alpha=0.15 dirichlet_fraction=0.25 channels=192 residual_blocks=12 policy_channels=16 value_channels=8 value_hidden=512 use_se=True augment_symmetries=True amp=True amp_dtype=none mcts_amp_dtype=bf16 metrics_path=alphazero_gomoku/outputs/metrics/prod-v2-smoke-fp32.jsonl
+iter=1/1 phase=selfplay_start
+selfplay_progress iter=1 games=1/16 elapsed=11s eta=2m 52s worker=12 device=cuda:0 worker_game=1/1 moves=23 policy_entropy=1.262 game_time=1s
+selfplay_progress iter=1 games=2/16 elapsed=12s eta=1m 24s worker=4 device=cuda:0 worker_game=1/1 moves=36 policy_entropy=0.794 game_time=2s
+selfplay_worker_done iter=1 device=cuda:0 games=1 examples=23 policy_entropy=1.262
+selfplay_progress iter=1 games=3/16 elapsed=12s eta=52s worker=2 device=cuda:2 worker_game=1/1 moves=36 policy_entropy=0.810 game_time=2s
+selfplay_worker_done iter=1 device=cuda:0 games=1 examples=36 policy_entropy=0.794
+selfplay_progress iter=1 games=4/16 elapsed=12s eta=37s worker=3 device=cuda:3 worker_game=1/1 moves=42 policy_entropy=0.672 game_time=2s
+selfplay_worker_done iter=1 device=cuda:2 games=1 examples=36 policy_entropy=0.810
+selfplay_progress iter=1 games=5/16 elapsed=12s eta=27s worker=6 device=cuda:2 worker_game=1/1 moves=48 policy_entropy=0.581 game_time=2s
+selfplay_worker_done iter=1 device=cuda:3 games=1 examples=42 policy_entropy=0.672
+selfplay_progress iter=1 games=6/16 elapsed=12s eta=20s worker=15 device=cuda:3 worker_game=1/1 moves=40 policy_entropy=0.702 game_time=2s
+selfplay_worker_done iter=1 device=cuda:2 games=1 examples=48 policy_entropy=0.581
+selfplay_progress iter=1 games=7/16 elapsed=12s eta=16s worker=8 device=cuda:0 worker_game=1/1 moves=53 policy_entropy=0.547 game_time=2s
+selfplay_worker_done iter=1 device=cuda:3 games=1 examples=40 policy_entropy=0.702
+selfplay_progress iter=1 games=8/16 elapsed=12s eta=12s worker=10 device=cuda:2 worker_game=1/1 moves=45 policy_entropy=0.625 game_time=2s
+selfplay_worker_done iter=1 device=cuda:0 games=1 examples=53 policy_entropy=0.547
+selfplay_progress iter=1 games=9/16 elapsed=12s eta=9s worker=7 device=cuda:3 worker_game=1/1 moves=48 policy_entropy=0.590 game_time=2s
+selfplay_worker_done iter=1 device=cuda:2 games=1 examples=45 policy_entropy=0.625
+selfplay_progress iter=1 games=10/16 elapsed=12s eta=7s worker=11 device=cuda:3 worker_game=1/1 moves=51 policy_entropy=0.559 game_time=2s
+selfplay_worker_done iter=1 device=cuda:3 games=1 examples=48 policy_entropy=0.590
+selfplay_progress iter=1 games=11/16 elapsed=12s eta=5s worker=0 device=cuda:0 worker_game=1/1 moves=70 policy_entropy=0.408 game_time=5s
+selfplay_worker_done iter=1 device=cuda:3 games=1 examples=51 policy_entropy=0.559
+selfplay_progress iter=1 games=12/16 elapsed=12s eta=4s worker=14 device=cuda:2 worker_game=1/1 moves=55 policy_entropy=0.514 game_time=2s
+selfplay_worker_done iter=1 device=cuda:0 games=1 examples=70 policy_entropy=0.408
+selfplay_progress iter=1 games=13/16 elapsed=13s eta=3s worker=13 device=cuda:1 worker_game=1/1 moves=51 policy_entropy=0.548 game_time=3s
+selfplay_worker_done iter=1 device=cuda:2 games=1 examples=55 policy_entropy=0.514
+selfplay_progress iter=1 games=14/16 elapsed=13s eta=1s worker=9 device=cuda:1 worker_game=1/1 moves=51 policy_entropy=0.579 game_time=3s
+selfplay_worker_done iter=1 device=cuda:1 games=1 examples=51 policy_entropy=0.548
+selfplay_progress iter=1 games=15/16 elapsed=13s eta=0s worker=1 device=cuda:1 worker_game=1/1 moves=68 policy_entropy=0.419 game_time=5s
+selfplay_worker_done iter=1 device=cuda:1 games=1 examples=51 policy_entropy=0.579
+selfplay_progress iter=1 games=16/16 elapsed=13s eta=0s worker=5 device=cuda:1 worker_game=1/1 moves=56 policy_entropy=0.503 game_time=3s
+selfplay_worker_done iter=1 device=cuda:1 games=1 examples=68 policy_entropy=0.419
+selfplay_worker_done iter=1 device=cuda:1 games=1 examples=56 policy_entropy=0.503
+iter=1/1 phase=selfplay_done raw_examples=773 examples=6184 avg_moves=48.3 replay=6184 target_policy_entropy=0.6320 black_win_rate=0.438 white_win_rate=0.562 draw_rate=0.000 elapsed=17s
+train_progress iter=1/1 epoch=1/1 elapsed=7s loss=5.6260 policy=4.6271 value=0.9989 policy_kl=4.0494 target_entropy=0.5776 pred_entropy=4.5819 policy_top1=0.0127 value_mae=0.9970 value_acc=0.1379 grad_norm=214869.8652 steps=2 lr=4e-05 skipped=0
+iter=1/1 raw_examples=773 examples=6184 avg_moves=48.3 loss=5.6260 policy=4.6271 value=0.9989 policy_kl=4.0494 target_entropy=0.5776 pred_entropy=4.5819 policy_top1=0.0127 value_mae=0.9970 value_acc=0.1379 selfplay_entropy=0.6320 eval_score=1.000 steps=2 skipped=0 iter_time=25s total_elapsed=25s total_eta=0s saved=alphazero_gomoku/outputs/checkpoints/prod-v2-smoke-fp32/gomoku10_iter_0001.pt
+replay_saved path=alphazero_gomoku/outputs/replay/prod-v2-smoke-fp32_replay.pt examples=6184

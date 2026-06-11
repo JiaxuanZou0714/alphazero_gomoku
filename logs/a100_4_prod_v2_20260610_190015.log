@@ -1,0 +1,154 @@
+device=cuda
+training_data_parallel=[0, 1, 2, 3]
+self_play_workers=16 self_play_devices=['cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']
+config preset=a100-4 iterations=100 games_per_iteration=96 simulations=384 mcts_batch_size=48 epochs=3 train_steps_per_iteration=96 batch_size=4096 replay_size=500000 lr=0.0002 min_lr=2e-05 lr_schedule=cosine warmup_iterations=5 mcts_c_puct=1.25 dirichlet_alpha=0.15 dirichlet_fraction=0.25 channels=192 residual_blocks=12 policy_channels=16 value_channels=8 value_hidden=512 use_se=True augment_symmetries=True metrics_path=alphazero_gomoku/outputs/metrics/a100-4-prod-v2.jsonl
+iter=1/100 phase=selfplay_start
+selfplay_progress iter=1 games=1/96 elapsed=16s eta=26m 21s worker=11 device=cuda:3 worker_game=1/6 moves=19 policy_entropy=2.792 game_time=7s
+selfplay_progress iter=1 games=2/96 elapsed=16s eta=13m 15s worker=8 device=cuda:0 worker_game=1/6 moves=21 policy_entropy=2.523 game_time=8s
+selfplay_progress iter=1 games=3/96 elapsed=17s eta=8m 49s worker=7 device=cuda:3 worker_game=1/6 moves=22 policy_entropy=2.400 game_time=7s
+selfplay_progress iter=1 games=4/96 elapsed=17s eta=6m 38s worker=13 device=cuda:1 worker_game=1/6 moves=24 policy_entropy=2.200 game_time=8s
+selfplay_progress iter=1 games=5/96 elapsed=17s eta=5m 16s worker=15 device=cuda:3 worker_game=1/6 moves=19 policy_entropy=2.777 game_time=8s
+selfplay_progress iter=1 games=6/96 elapsed=18s eta=4m 42s worker=0 device=cuda:0 worker_game=1/6 moves=27 policy_entropy=1.964 game_time=10s
+selfplay_progress iter=1 games=7/96 elapsed=18s eta=4m 00s worker=6 device=cuda:2 worker_game=1/6 moves=33 policy_entropy=1.606 game_time=9s
+selfplay_progress iter=1 games=8/96 elapsed=18s eta=3m 28s worker=3 device=cuda:3 worker_game=1/6 moves=35 policy_entropy=1.509 game_time=10s
+selfplay_progress iter=1 games=9/96 elapsed=19s eta=3m 05s worker=4 device=cuda:0 worker_game=1/6 moves=30 policy_entropy=1.765 game_time=10s
+selfplay_progress iter=1 games=10/96 elapsed=19s eta=2m 50s worker=10 device=cuda:2 worker_game=1/6 moves=32 policy_entropy=1.653 game_time=10s
+selfplay_progress iter=1 games=11/96 elapsed=19s eta=2m 33s worker=2 device=cuda:2 worker_game=1/6 moves=36 policy_entropy=1.467 game_time=10s
+selfplay_progress iter=1 games=12/96 elapsed=20s eta=2m 21s worker=12 device=cuda:0 worker_game=1/6 moves=39 policy_entropy=1.358 game_time=11s
+selfplay_progress iter=1 games=13/96 elapsed=20s eta=2m 09s worker=8 device=cuda:0 worker_game=2/6 moves=11 policy_entropy=4.209 game_time=3s
+selfplay_progress iter=1 games=14/96 elapsed=21s eta=2m 05s worker=14 device=cuda:2 worker_game=1/6 moves=47 policy_entropy=1.127 game_time=12s
+selfplay_progress iter=1 games=15/96 elapsed=23s eta=2m 05s worker=9 device=cuda:1 worker_game=1/6 moves=62 policy_entropy=0.852 game_time=14s
+selfplay_progress iter=1 games=16/96 elapsed=23s eta=1m 58s worker=11 device=cuda:3 worker_game=2/6 moves=23 policy_entropy=2.290 game_time=6s
+selfplay_progress iter=1 games=17/96 elapsed=23s eta=1m 50s worker=1 device=cuda:1 worker_game=1/6 moves=42 policy_entropy=1.260 game_time=15s
+selfplay_progress iter=1 games=18/96 elapsed=23s eta=1m 43s worker=5 device=cuda:1 worker_game=1/6 moves=41 policy_entropy=1.290 game_time=14s
+selfplay_progress iter=1 games=19/96 elapsed=25s eta=1m 43s worker=8 device=cuda:0 worker_game=3/6 moves=16 policy_entropy=3.295 game_time=5s
+selfplay_progress iter=1 games=20/96 elapsed=25s eta=1m 37s worker=7 device=cuda:3 worker_game=2/6 moves=32 policy_entropy=1.655 game_time=8s
+selfplay_progress iter=1 games=21/96 elapsed=27s eta=1m 37s worker=12 device=cuda:0 worker_game=2/6 moves=29 policy_entropy=1.815 game_time=7s
+selfplay_progress iter=1 games=22/96 elapsed=28s eta=1m 35s worker=13 device=cuda:1 worker_game=2/6 moves=47 policy_entropy=1.123 game_time=11s
+selfplay_progress iter=1 games=23/96 elapsed=28s eta=1m 31s worker=6 device=cuda:2 worker_game=2/6 moves=38 policy_entropy=1.388 game_time=9s
+selfplay_progress iter=1 games=24/96 elapsed=28s eta=1m 26s worker=15 device=cuda:3 worker_game=2/6 moves=43 policy_entropy=1.230 game_time=11s
+selfplay_progress iter=1 games=25/96 elapsed=29s eta=1m 23s worker=4 device=cuda:0 worker_game=2/6 moves=38 policy_entropy=1.389 game_time=10s
+selfplay_progress iter=1 games=26/96 elapsed=30s eta=1m 21s worker=8 device=cuda:0 worker_game=4/6 moves=12 policy_entropy=4.135 game_time=4s
+selfplay_progress iter=1 games=27/96 elapsed=30s eta=1m 17s worker=0 device=cuda:0 worker_game=2/6 moves=43 policy_entropy=1.228 game_time=11s
+selfplay_progress iter=1 games=28/96 elapsed=30s eta=1m 14s worker=14 device=cuda:2 worker_game=2/6 moves=33 policy_entropy=1.604 game_time=9s
+selfplay_progress iter=1 games=29/96 elapsed=30s eta=1m 11s worker=3 device=cuda:3 worker_game=2/6 moves=50 policy_entropy=1.057 game_time=11s
+selfplay_progress iter=1 games=30/96 elapsed=32s eta=1m 11s worker=2 device=cuda:2 worker_game=2/6 moves=54 policy_entropy=0.978 game_time=12s
+selfplay_progress iter=1 games=31/96 elapsed=32s eta=1m 08s worker=5 device=cuda:1 worker_game=2/6 moves=32 policy_entropy=1.653 game_time=8s
+selfplay_progress iter=1 games=32/96 elapsed=32s eta=1m 05s worker=1 device=cuda:1 worker_game=2/6 moves=35 policy_entropy=1.498 game_time=9s
+selfplay_progress iter=1 games=33/96 elapsed=33s eta=1m 04s worker=10 device=cuda:2 worker_game=2/6 moves=61 policy_entropy=0.865 game_time=13s
+selfplay_progress iter=1 games=34/96 elapsed=34s eta=1m 02s worker=9 device=cuda:1 worker_game=2/6 moves=36 policy_entropy=1.476 game_time=10s
+selfplay_progress iter=1 games=35/96 elapsed=34s eta=59s worker=12 device=cuda:0 worker_game=3/6 moves=25 policy_entropy=2.113 game_time=7s
+selfplay_progress iter=1 games=36/96 elapsed=34s eta=57s worker=0 device=cuda:0 worker_game=3/6 moves=10 policy_entropy=4.159 game_time=4s
+selfplay_progress iter=1 games=37/96 elapsed=35s eta=56s worker=6 device=cuda:2 worker_game=3/6 moves=23 policy_entropy=2.292 game_time=6s
+selfplay_progress iter=1 games=38/96 elapsed=35s eta=54s worker=11 device=cuda:3 worker_game=3/6 moves=53 policy_entropy=1.002 game_time=12s
+selfplay_progress iter=1 games=39/96 elapsed=35s eta=52s worker=13 device=cuda:1 worker_game=3/6 moves=32 policy_entropy=1.650 game_time=7s
+selfplay_progress iter=1 games=40/96 elapsed=37s eta=52s worker=3 device=cuda:3 worker_game=3/6 moves=20 policy_entropy=2.642 game_time=6s
+selfplay_progress iter=1 games=41/96 elapsed=37s eta=50s worker=15 device=cuda:3 worker_game=3/6 moves=29 policy_entropy=1.826 game_time=8s
+selfplay_progress iter=1 games=42/96 elapsed=38s eta=49s worker=7 device=cuda:3 worker_game=3/6 moves=55 policy_entropy=0.963 game_time=12s
+selfplay_progress iter=1 games=43/96 elapsed=38s eta=47s worker=2 device=cuda:2 worker_game=3/6 moves=20 policy_entropy=2.642 game_time=6s
+selfplay_progress iter=1 games=44/96 elapsed=40s eta=47s worker=8 device=cuda:0 worker_game=5/6 moves=40 policy_entropy=1.321 game_time=10s
+selfplay_progress iter=1 games=45/96 elapsed=41s eta=47s worker=4 device=cuda:0 worker_game=3/6 moves=52 policy_entropy=1.014 game_time=12s
+selfplay_progress iter=1 games=46/96 elapsed=42s eta=45s worker=14 device=cuda:2 worker_game=3/6 moves=49 policy_entropy=1.078 game_time=11s
+selfplay_progress iter=1 games=47/96 elapsed=42s eta=44s worker=10 device=cuda:2 worker_game=3/6 moves=36 policy_entropy=1.469 game_time=8s
+selfplay_progress iter=1 games=48/96 elapsed=43s eta=43s worker=11 device=cuda:3 worker_game=4/6 moves=28 policy_entropy=1.891 game_time=7s
+selfplay_progress iter=1 games=49/96 elapsed=43s eta=41s worker=6 device=cuda:2 worker_game=4/6 moves=31 policy_entropy=1.704 game_time=8s
+selfplay_progress iter=1 games=50/96 elapsed=44s eta=40s worker=1 device=cuda:1 worker_game=3/6 moves=47 policy_entropy=1.125 game_time=11s
+selfplay_progress iter=1 games=51/96 elapsed=44s eta=39s worker=0 device=cuda:0 worker_game=4/6 moves=36 policy_entropy=1.462 game_time=9s
+selfplay_progress iter=1 games=52/96 elapsed=44s eta=37s worker=5 device=cuda:1 worker_game=3/6 moves=48 policy_entropy=1.105 game_time=11s
+selfplay_progress iter=1 games=53/96 elapsed=44s eta=36s worker=12 device=cuda:0 worker_game=4/6 moves=41 policy_entropy=1.291 game_time=10s
+selfplay_progress iter=1 games=54/96 elapsed=44s eta=34s worker=9 device=cuda:1 worker_game=3/6 moves=38 policy_entropy=1.389 game_time=10s
+selfplay_progress iter=1 games=55/96 elapsed=45s eta=33s worker=13 device=cuda:1 worker_game=4/6 moves=34 policy_entropy=1.553 game_time=9s
+selfplay_progress iter=1 games=56/96 elapsed=47s eta=33s worker=15 device=cuda:3 worker_game=4/6 moves=34 policy_entropy=1.559 game_time=9s
+selfplay_progress iter=1 games=57/96 elapsed=48s eta=33s worker=3 device=cuda:3 worker_game=4/6 moves=45 policy_entropy=1.177 game_time=10s
+selfplay_progress iter=1 games=58/96 elapsed=49s eta=32s worker=10 device=cuda:2 worker_game=4/6 moves=25 policy_entropy=2.112 game_time=7s
+selfplay_progress iter=1 games=59/96 elapsed=49s eta=31s worker=4 device=cuda:0 worker_game=4/6 moves=30 policy_entropy=1.763 game_time=8s
+selfplay_progress iter=1 games=60/96 elapsed=49s eta=29s worker=2 device=cuda:2 worker_game=4/6 moves=48 policy_entropy=1.102 game_time=11s
+selfplay_progress iter=1 games=61/96 elapsed=51s eta=29s worker=7 device=cuda:3 worker_game=4/6 moves=54 policy_entropy=0.977 game_time=13s
+selfplay_progress iter=1 games=62/96 elapsed=51s eta=28s worker=6 device=cuda:2 worker_game=5/6 moves=28 policy_entropy=1.886 game_time=8s
+selfplay_progress iter=1 games=63/96 elapsed=52s eta=27s worker=1 device=cuda:1 worker_game=4/6 moves=31 policy_entropy=1.705 game_time=8s
+selfplay_progress iter=1 games=64/96 elapsed=52s eta=26s worker=8 device=cuda:0 worker_game=6/6 moves=56 policy_entropy=0.946 game_time=12s
+selfplay_progress iter=1 games=65/96 elapsed=52s eta=25s worker=14 device=cuda:2 worker_game=4/6 moves=45 policy_entropy=1.172 game_time=10s
+selfplay_worker_done iter=1 device=cuda:0 games=6 examples=156 policy_entropy=2.738
+selfplay_progress iter=1 games=66/96 elapsed=53s eta=24s worker=5 device=cuda:1 worker_game=4/6 moves=35 policy_entropy=1.507 game_time=9s
+selfplay_progress iter=1 games=67/96 elapsed=53s eta=23s worker=13 device=cuda:1 worker_game=5/6 moves=35 policy_entropy=1.502 game_time=8s
+selfplay_progress iter=1 games=68/96 elapsed=54s eta=22s worker=12 device=cuda:0 worker_game=5/6 moves=43 policy_entropy=1.229 game_time=10s
+selfplay_progress iter=1 games=69/96 elapsed=55s eta=21s worker=9 device=cuda:1 worker_game=4/6 moves=41 policy_entropy=1.289 game_time=10s
+selfplay_progress iter=1 games=70/96 elapsed=56s eta=20s worker=0 device=cuda:0 worker_game=5/6 moves=45 policy_entropy=1.174 game_time=11s
+selfplay_progress iter=1 games=71/96 elapsed=56s eta=19s worker=11 device=cuda:3 worker_game=5/6 moves=60 policy_entropy=0.881 game_time=13s
+selfplay_progress iter=1 games=72/96 elapsed=57s eta=19s worker=15 device=cuda:3 worker_game=5/6 moves=34 policy_entropy=1.548 game_time=9s
+selfplay_progress iter=1 games=73/96 elapsed=59s eta=18s worker=4 device=cuda:0 worker_game=5/6 moves=37 policy_entropy=1.429 game_time=9s
+selfplay_progress iter=1 games=74/96 elapsed=59s eta=17s worker=3 device=cuda:3 worker_game=5/6 moves=44 policy_entropy=1.203 game_time=10s
+selfplay_progress iter=1 games=75/96 elapsed=59s eta=16s worker=13 device=cuda:1 worker_game=6/6 moves=16 policy_entropy=3.311 game_time=5s
+selfplay_progress iter=1 games=76/96 elapsed=59s eta=15s worker=1 device=cuda:1 worker_game=5/6 moves=23 policy_entropy=2.291 game_time=7s
+selfplay_worker_done iter=1 device=cuda:1 games=6 examples=188 policy_entropy=1.890
+selfplay_progress iter=1 games=77/96 elapsed=1m 00s eta=14s worker=10 device=cuda:2 worker_game=5/6 moves=45 policy_entropy=1.179 game_time=10s
+selfplay_progress iter=1 games=78/96 elapsed=1m 00s eta=13s worker=2 device=cuda:2 worker_game=5/6 moves=43 policy_entropy=1.227 game_time=10s
+selfplay_progress iter=1 games=79/96 elapsed=1m 00s eta=13s worker=6 device=cuda:2 worker_game=6/6 moves=38 policy_entropy=1.390 game_time=9s
+selfplay_progress iter=1 games=80/96 elapsed=1m 01s eta=12s worker=7 device=cuda:3 worker_game=5/6 moves=39 policy_entropy=1.357 game_time=9s
+selfplay_worker_done iter=1 device=cuda:2 games=6 examples=191 policy_entropy=1.711
+selfplay_progress iter=1 games=81/96 elapsed=1m 01s eta=11s worker=14 device=cuda:2 worker_game=5/6 moves=31 policy_entropy=1.710 game_time=8s
+selfplay_progress iter=1 games=82/96 elapsed=1m 01s eta=10s worker=9 device=cuda:1 worker_game=5/6 moves=19 policy_entropy=2.794 game_time=6s
+selfplay_progress iter=1 games=83/96 elapsed=1m 02s eta=9s worker=5 device=cuda:1 worker_game=5/6 moves=36 policy_entropy=1.462 game_time=9s
+selfplay_progress iter=1 games=84/96 elapsed=1m 03s eta=9s worker=12 device=cuda:0 worker_game=6/6 moves=37 policy_entropy=1.426 game_time=8s
+selfplay_worker_done iter=1 device=cuda:0 games=6 examples=214 policy_entropy=1.539
+selfplay_progress iter=1 games=85/96 elapsed=1m 04s eta=8s worker=15 device=cuda:3 worker_game=6/6 moves=28 policy_entropy=1.891 game_time=7s
+selfplay_worker_done iter=1 device=cuda:3 games=6 examples=187 policy_entropy=1.805
+selfplay_progress iter=1 games=86/96 elapsed=1m 06s eta=7s worker=11 device=cuda:3 worker_game=6/6 moves=38 policy_entropy=1.392 game_time=9s
+selfplay_progress iter=1 games=87/96 elapsed=1m 06s eta=6s worker=0 device=cuda:0 worker_game=6/6 moves=42 policy_entropy=1.265 game_time=10s
+selfplay_worker_done iter=1 device=cuda:3 games=6 examples=221 policy_entropy=1.708
+selfplay_progress iter=1 games=88/96 elapsed=1m 07s eta=6s worker=2 device=cuda:2 worker_game=6/6 moves=23 policy_entropy=2.293 game_time=6s
+selfplay_worker_done iter=1 device=cuda:0 games=6 examples=203 policy_entropy=1.875
+selfplay_progress iter=1 games=89/96 elapsed=1m 07s eta=5s worker=4 device=cuda:0 worker_game=6/6 moves=32 policy_entropy=1.647 game_time=8s
+selfplay_worker_done iter=1 device=cuda:2 games=6 examples=224 policy_entropy=1.618
+selfplay_progress iter=1 games=90/96 elapsed=1m 07s eta=4s worker=3 device=cuda:3 worker_game=6/6 moves=34 policy_entropy=1.557 game_time=8s
+selfplay_worker_done iter=1 device=cuda:0 games=6 examples=219 policy_entropy=1.501
+selfplay_progress iter=1 games=91/96 elapsed=1m 08s eta=3s worker=1 device=cuda:1 worker_game=6/6 moves=38 policy_entropy=1.389 game_time=9s
+selfplay_worker_done iter=1 device=cuda:3 games=6 examples=228 policy_entropy=1.524
+selfplay_worker_done iter=1 device=cuda:1 games=6 examples=216 policy_entropy=1.545
+selfplay_progress iter=1 games=92/96 elapsed=1m 10s eta=3s worker=7 device=cuda:3 worker_game=6/6 moves=36 policy_entropy=1.464 game_time=8s
+selfplay_progress iter=1 games=93/96 elapsed=1m 10s eta=2s worker=9 device=cuda:1 worker_game=6/6 moves=37 policy_entropy=1.432 game_time=8s
+selfplay_worker_done iter=1 device=cuda:3 games=6 examples=238 policy_entropy=1.470
+selfplay_progress iter=1 games=94/96 elapsed=1m 11s eta=1s worker=10 device=cuda:2 worker_game=6/6 moves=47 policy_entropy=1.126 game_time=10s
+selfplay_worker_done iter=1 device=cuda:1 games=6 examples=233 policy_entropy=1.539
+selfplay_progress iter=1 games=95/96 elapsed=1m 11s eta=0s worker=14 device=cuda:2 worker_game=6/6 moves=47 policy_entropy=1.131 game_time=9s
+selfplay_worker_done iter=1 device=cuda:2 games=6 examples=246 policy_entropy=1.401
+selfplay_worker_done iter=1 device=cuda:2 games=6 examples=252 policy_entropy=1.304
+selfplay_progress iter=1 games=96/96 elapsed=1m 14s eta=0s worker=5 device=cuda:1 worker_game=6/6 moves=51 policy_entropy=1.039 game_time=11s
+selfplay_worker_done iter=1 device=cuda:1 games=6 examples=243 policy_entropy=1.343
+iter=1/100 phase=selfplay_done raw_examples=3459 examples=27672 avg_moves=36.0 replay=27672 target_policy_entropy=1.6568 black_win_rate=0.510 white_win_rate=0.490 draw_rate=0.000 elapsed=1m 18s
+train_warning skipped_batch loss=24899.56640625 policy=4.622008323669434 value=24894.9453125 logits_min=-2.1640625 logits_max=2.107421875 pred_value_min=-512.0 pred_value_max=512.0 label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=18123.078125 policy=4.627245903015137 value=18118.451171875 logits_min=-1.9833984375 logits_max=2.25 pred_value_min=-512.0 pred_value_max=512.0 label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.624414443969727 value=nan logits_min=-2.197265625 logits_max=2.142578125 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=11652.9521484375 policy=4.622567176818848 value=11648.3291015625 logits_min=-2.0546875 logits_max=2.0625 pred_value_min=-512.0 pred_value_max=512.0 label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=2015.1806640625 policy=30.5419921875 value=1984.638671875 logits_min=-118.6875 logits_max=120.125 pred_value_min=-512.0 pred_value_max=512.0 label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=17373.681640625 policy=4.621460914611816 value=17369.060546875 logits_min=-2.30078125 logits_max=2.1328125 pred_value_min=-512.0 pred_value_max=512.0 label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.6243743896484375 value=nan logits_min=-2.26171875 logits_max=1.98046875 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=6.9144673347473145 value=nan logits_min=-25.15625 logits_max=26.546875 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.634330749511719 value=nan logits_min=-2.490234375 logits_max=2.1328125 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.620149612426758 value=nan logits_min=-1.8330078125 logits_max=2.060546875 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.624679088592529 value=nan logits_min=-2.044921875 logits_max=2.296875 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.621615409851074 value=nan logits_min=-2.119140625 logits_max=2.07421875 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.642786979675293 value=nan logits_min=-2.181640625 logits_max=2.876953125 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.624929428100586 value=nan logits_min=-2.06640625 logits_max=1.865234375 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.620244979858398 value=nan logits_min=-2.171875 logits_max=2.0078125 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=nan value=1.1010627746582031 logits_min=nan logits_max=nan pred_value_min=-1.8173828125 pred_value_max=1.791015625 label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.628636837005615 value=nan logits_min=-2.078125 logits_max=2.169921875 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.6259026527404785 value=nan logits_min=-2.458984375 logits_max=2.1953125 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.645594596862793 value=nan logits_min=-2.0703125 logits_max=2.5703125 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.624168395996094 value=nan logits_min=-2.158203125 logits_max=2.4453125 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.627620697021484 value=nan logits_min=-2.064453125 logits_max=2.103515625 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=24077.39453125 policy=4.624514579772949 value=24072.76953125 logits_min=-2.3046875 logits_max=2.26171875 pred_value_min=-512.0 pred_value_max=512.0 label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=nan value=nan logits_min=nan logits_max=nan pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.624138832092285 value=nan logits_min=-2.251953125 logits_max=2.28515625 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=nan value=1.0078661441802979 logits_min=nan logits_max=nan pred_value_min=-0.3330078125 pred_value_max=2.146484375 label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.622245788574219 value=nan logits_min=-1.9130859375 logits_max=2.177734375 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=nan value=nan logits_min=nan logits_max=nan pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=1026260.0625 policy=4.646658420562744 value=1026255.4375 logits_min=-2.099609375 logits_max=3.00390625 pred_value_min=-32768.0 pred_value_max=32768.0 label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.623042583465576 value=nan logits_min=-1.9716796875 logits_max=2.29296875 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=nan value=1.107059121131897 logits_min=nan logits_max=nan pred_value_min=-1.4775390625 pred_value_max=1.5263671875 label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.639873504638672 value=nan logits_min=-2.064453125 logits_max=2.5546875 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.619414329528809 value=nan logits_min=-2.09375 logits_max=2.234375 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.622557640075684 value=nan logits_min=-2.146484375 logits_max=2.115234375 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.620357513427734 value=nan logits_min=-2.16796875 logits_max=2.25 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.623208522796631 value=nan logits_min=-2.462890625 logits_max=2.048828125 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
+train_warning skipped_batch loss=nan policy=4.622054100036621 value=nan logits_min=-1.8896484375 logits_max=2.26953125 pred_value_min=nan pred_value_max=nan label_min=-1.0 label_max=1.0
