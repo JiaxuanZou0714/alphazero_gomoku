@@ -172,65 +172,53 @@ http://127.0.0.1:8765
 
 ## 训练曲线
 
-下面的图来自 `a100-4-prod-v3` 训练（旧版代码，对应原始日志已从仓库移除）。该日志第 `1-30` 轮有完整的 self-play、train 和 eval summary，因此下图只统计完整的 `1-30` 轮。
+下面的图来自 v3 完整训练的 `outputs/metrics/a100-4-prod-v3.jsonl`（100 轮，4×A100，总耗时约 `13.2` 小时）。所有图中的两条虚线是两次训练中干预：
+
+- **@41**（灰）：replay 窗口 `500k → 80k`、梯度裁剪 `5 → 10`；
+- **@65**（黑）：从第 65 轮 checkpoint 回滚重启，`soft_policy_loss_weight 8 → 4`、`value_loss_weight 1 → 1.5`（第 66-70 轮的废弃分支不在图中）。
 
 ### 总览
 
-![metrics overview](outputs/plots/a100_4_prod_v3_stable_20260610_194644/metrics_overview.png)
+![metrics overview](outputs/plots/a100-4-prod-v3/metrics_overview.png)
 
 ### 损失曲线
 
-![losses](outputs/plots/a100_4_prod_v3_stable_20260610_194644/losses.png)
+![losses](outputs/plots/a100-4-prod-v3/losses.png)
 
-前 3 轮是最明显的学习阶段：总损失从 `4.5253` 降到 `1.9173`，policy loss 从 `4.4537` 降到 `1.8296`，`policy_kl` 也从 `3.0433` 降到 `0.6739`。这说明模型很快从接近均匀策略转向能拟合 MCTS 访问分布的策略。
-
-第 4 轮之后，总损失大多在 `1.9-2.0` 附近波动，而不是继续单调下降。这在自我对弈训练里是正常现象：数据分布会随着模型变强而移动，后续样本并不是固定监督集。
+`policy_loss` 从 `2.99` 稳定降到 `1.80`。注意交叉熵的下限是目标分布的熵：τ=1 软目标下 `policy_loss ≈ target_entropy + policy_kl`，所以绝对值不会趋近 0，真正反映拟合差距的是 `policy_kl`（`0.37` 收敛）。总损失未画出——两次损失权重调整后它的量纲不可比。第 1 轮没有训练数据点：当时 replay 小于一个 batch、整轮被跳过（这个 bug 后来已修复）。
 
 ### 策略和值网络指标
 
-![accuracy value](outputs/plots/a100_4_prod_v3_stable_20260610_194644/accuracy_value.png)
+![accuracy value](outputs/plots/a100-4-prod-v3/accuracy_value.png)
 
-`policy_top1` 从第 1 轮的 `0.1480` 快速升到第 3 轮的 `0.6920`，之后基本维持在 `0.68-0.70`。这说明网络对 MCTS 首选落点的拟合已经较稳定。
+`policy_top1` 从 `0.42` 一路升到 `0.758`，到第 100 轮仍未平台化。
 
-`value_acc` 从 `0.9715` 缓慢下降到 `0.9323`，`value_mae` 从约 `0.10` 上升到约 `0.19`。这不一定代表训练崩坏，更可能说明后期自我对弈局面更短、更尖锐，胜负标签更集中，价值头面对的分布发生了变化。后续如果要继续增强，应重点观察独立评估胜率，而不是只看 value loss。
+`value_loss` 是这次训练最重要的故事线：从第 3 轮的 `0.047` 单调恶化到第 65 轮的 `0.116`（根因是 replay 窗口换算错误 + soft policy 权重过高，见「v3 训练复盘」），@65 干预后回落到 `0.094` 并企稳，终值 `0.099`；`value_acc` 对应从 `0.94 → 0.85 → 0.876` 走出 V 形恢复。
 
 ### 熵和策略确定性
 
-![entropy](outputs/plots/a100_4_prod_v3_stable_20260610_194644/entropy.png)
+![entropy](outputs/plots/a100-4-prod-v3/entropy.png)
 
-`pred_entropy` 从 `4.5976` 快速降到约 `1.8`，说明网络输出从接近全棋盘均匀分布变得更集中。与此同时，后期 `target_entropy` 和 `selfplay_entropy` 有所回升，表示 MCTS 目标并不是完全塌缩到单一落点，仍然保留一定搜索分歧。
+`selfplay_entropy`（MCTS 目标的熵）从 `3.9` 降到约 `1.3`；`pred_entropy` 与 `target_entropy` 的差距持续收窄但不归零——策略目标/采样温度解耦后，目标保留了 τ=1 的搜索分歧，不再塌缩成 one-hot。
 
 ### 自我对弈结果
 
-![selfplay outcomes](outputs/plots/a100_4_prod_v3_stable_20260610_194644/selfplay_outcomes.png)
+![selfplay outcomes](outputs/plots/a100-4-prod-v3/selfplay_outcomes.png)
 
-平均步数从第 1 轮的 `37.4` 降到第 30 轮的 `14.3`，说明模型越来越快地进入决定性局面。训练集中没有平局，黑棋胜率从约 `0.56` 升到约 `0.82`，白棋胜率对应下降。
-
-这反映了两个信息：
-
-- 模型学到了更直接的胜负线路，棋局明显变短；
-- 当前 `10x10` 设置和自我对弈采样下存在很强的先手优势或先手偏置。
-
-如果后续要做更公平的棋力评估，建议固定一组开局、交换先后手，并单独统计黑白胜率。
+平均步数先从 `42` 降到中段的 `14-15`（攻强守弱的速决战阶段），价值头恢复后回升到 `18-20`——防守能力成型让棋局重新变长，这是比损失更有说服力的行为证据。黑棋胜率全程在 `0.65` 上下，先手优势仍然显著但未失控。`full_search_rate` 稳定在 `0.25`，与 playout cap randomization 的配置一致。
 
 ### 数据量、耗时和评估
 
-![data timing eval](outputs/plots/a100_4_prod_v3_stable_20260610_194644/data_timing_eval.png)
+![data timing eval](outputs/plots/a100-4-prod-v3/data_timing_eval.png)
 
-replay buffer 从 `28.7k` 增长到 `441.6k` 样本。由于棋局变短，每轮产生的 `raw_examples` 和增强后的 `examples` 后期明显减少。
+replay 在第 47 轮触及 `80k` 上限后开始滑动淘汰。`grad_norm` 在 @65 之前长期高于裁剪阈值（等效学习率被打折），降低 soft 权重后回到阈值以下。
 
-每轮耗时主要在 `7-10` 分钟之间，自我对弈部分占主要时间。learning rate 在前 5 轮 warmup 到 `2e-4`，之后按 cosine schedule 缓慢下降，到第 30 轮约为 `1.71e-4`。`grad_norm` 在第 5 轮附近达到高点，之后整体下降，说明训练后期更新幅度更稳定。
+评估（随机配对开局，每 5 轮 16 局）：晋升发生在第 `45/50/55/65/75/85/95` 轮，失败在第 `60/70/80/90/100` 轮——后期"晋升一次、失败一次"的锯齿是收敛末期的典型形态。**最终最强模型是第 95 轮**（`gomoku10_best.pt`），第 100 轮候选对它战成 `0.5`，恰好停在天花板上。
 
-评估分数大部分为 `1.0`。第 5 轮候选模型评估失败，`eval_score=0.0`；第 20 轮只有 `0.5`，低于晋升阈值；第 30 轮重新达到 `1.0`。这说明训练过程中有少数候选 checkpoint 没有超过 champion，但整体没有出现持续性退化。
-
-### 全部数值指标
-
-![all numeric metrics](outputs/plots/a100_4_prod_v3_stable_20260610_194644/all_numeric_metrics.png)
-
-解析后的表格保存在：
+完整数值表导出在：
 
 ```text
-outputs/plots/a100_4_prod_v3_stable_20260610_194644/metrics_from_log.csv
+outputs/plots/a100-4-prod-v3/metrics.csv
 ```
 
 ## 测试
