@@ -236,12 +236,19 @@ def preset_config(name: str) -> TrainConfig:
         cfg.epochs = 3
         cfg.train_steps_per_iteration = 96
         cfg.batch_size = 4096
-        cfg.replay_size = 500_000
+        # Raw positions only (symmetry augmentation happens at train time), so
+        # 80k ≈ a ~50-iteration window. The old 500k was sized for 8x-augmented
+        # entries; keeping it would mean never evicting stale early-run data,
+        # whose bootstrapped value labels (mcts_value_weight) decay into noise.
+        cfg.replay_size = 80_000
         cfg.learning_rate = 2.0e-4
         cfg.min_learning_rate = 2.0e-5
         cfg.lr_schedule = "cosine"
         cfg.warmup_iterations = 5
         cfg.weight_decay = 1.0e-4
+        # The 8x soft policy term keeps healthy grad norms around 10; clipping
+        # at 5 would permanently halve the effective LR instead of catching spikes.
+        cfg.max_grad_norm = 10.0
         cfg.temperature_moves = 12
         cfg.mcts_c_puct = 1.25
         cfg.mcts_dirichlet_alpha = 0.15
@@ -906,6 +913,10 @@ def train_epoch(
             replay, kl_buffer=None
         )
     use_weighted = cfg.surprise_weighting and sample_weights is not None
+    # drop_last keeps batch sizes uniform under fixed step counts, but with a
+    # buffer smaller than one batch it would yield an empty loader and skip the
+    # iteration entirely — fall back to whatever batch the data can fill.
+    drop_last = cfg.train_steps_per_iteration > 0 and len(dataset) >= cfg.batch_size
     if use_weighted:
         from torch.utils.data import WeightedRandomSampler
         sampler = WeightedRandomSampler(
@@ -919,7 +930,7 @@ def train_epoch(
             sampler=sampler,
             pin_memory=cfg.device.startswith("cuda"),
             num_workers=0,
-            drop_last=cfg.train_steps_per_iteration > 0,
+            drop_last=drop_last,
         )
     else:
         loader = DataLoader(
@@ -928,7 +939,7 @@ def train_epoch(
             shuffle=True,
             pin_memory=cfg.device.startswith("cuda"),
             num_workers=0,
-            drop_last=cfg.train_steps_per_iteration > 0,
+            drop_last=drop_last,
         )
 
     model.train()

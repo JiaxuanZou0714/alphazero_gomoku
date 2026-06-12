@@ -95,7 +95,9 @@ class SelfPlayTest(unittest.TestCase):
 
 
 class TrainEpochTest(unittest.TestCase):
-    def test_empty_loader_does_not_crash(self) -> None:
+    def test_small_replay_falls_back_to_small_batches(self) -> None:
+        # replay smaller than one batch must still train (drop_last disabled)
+        # instead of silently skipping the whole iteration
         cfg = TrainConfig(batch_size=64, train_steps_per_iteration=2)
         cfg.device = "cpu"
         cfg.amp = False
@@ -103,7 +105,8 @@ class TrainEpochTest(unittest.TestCase):
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
         replay = deque(make_examples(8))
         stats = train_epoch(model, optimizer, replay, cfg, scaler=None)
-        self.assertEqual(stats.optimizer_steps, 0)
+        self.assertEqual(stats.optimizer_steps, 2)
+        self.assertTrue(np.isfinite(stats.loss))
 
     def test_one_step_runs(self) -> None:
         cfg = TrainConfig(batch_size=16, train_steps_per_iteration=2)
