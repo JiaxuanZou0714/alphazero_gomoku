@@ -4,13 +4,14 @@ import argparse
 import json
 import mimetypes
 import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .game import GomokuState
-from .mcts import MCTS, MCTSConfig, visit_count_policy
+from .mcts import MCTS, MCTSConfig
 from .utils import load_model, resolve_device
 
 
@@ -34,9 +35,10 @@ class GameSession:
         self.human_player = 1
         self.simulations = simulations
         self.history: list[dict] = []
-        self.last_ai_policy: list[dict] = []
+        self.last_analysis: dict = {}
         self.policy_source = "none"
         self.policy_player: int | None = None
+        self.eval_history: list[dict] = []
         self.undo_stack: list[tuple] = []
         # reuse a single MCTS object; its model ref is stable
         self._mcts = self._make_mcts(simulations)
@@ -81,9 +83,10 @@ class GameSession:
         self.human_player = 1 if human == "black" else -1
         self.set_simulations(int(simulations or self.default_simulations))
         self.history = []
-        self.last_ai_policy = []
+        self.last_analysis = {}
         self.policy_source = "none"
         self.policy_player = None
+        self.eval_history = []
         self.undo_stack = []
         if self.state.current_player != self.human_player:
             self._ai_move()
@@ -103,13 +106,14 @@ class GameSession:
             (
                 self.state,
                 list(self.history),
-                list(self.last_ai_policy),
+                dict(self.last_analysis),
                 self.policy_source,
                 self.policy_player,
+                list(self.eval_history),
             )
         )
         self.state = self.state.apply(action)
-        self.last_ai_policy = []
+        self.last_analysis = {}
         self.policy_source = "none"
         self.policy_player = None
         self.history.append(
@@ -127,12 +131,13 @@ class GameSession:
     def undo(self) -> dict:
         if not self.undo_stack:
             raise ValueError("nothing to undo")
-        state, history, policy, policy_source, policy_player = self.undo_stack.pop()
+        state, history, analysis, policy_source, policy_player, evals = self.undo_stack.pop()
         self.state = state
         self.history = history
-        self.last_ai_policy = policy
+        self.last_analysis = analysis
         self.policy_source = policy_source
         self.policy_player = policy_player
+        self.eval_history = evals
         return self.snapshot()
 
     def analyze(self, simulations: int | None = None) -> dict:
@@ -140,20 +145,22 @@ class GameSession:
             self.set_simulations(simulations)
         if self.state.is_terminal:
             raise ValueError("game is already over")
-        _, policy = self._search_policy()
-        self.last_ai_policy = policy
+        _, analysis = self._search_policy()
+        self.last_analysis = analysis
         self.policy_source = "analysis"
         self.policy_player = self.state.current_player
+        self._record_eval(analysis)
         return self.snapshot()
 
     def _ai_move(self) -> None:
         player = self.state.current_player
-        action, policy = self._search_policy()
+        action, analysis = self._search_policy()
         if action < 0:
             raise ValueError("AI could not find a legal move")
-        self.last_ai_policy = policy
+        self.last_analysis = analysis
         self.policy_source = "ai_move"
         self.policy_player = player
+        self._record_eval(analysis)
         row, col = self.state.action_to_coord(action)
         self.state = self.state.apply(action)
         self.history.append(
@@ -165,25 +172,83 @@ class GameSession:
             }
         )
 
-    def _search_policy(self) -> tuple[int, list[dict]]:
+    def _record_eval(self, analysis: dict) -> None:
+        """Track black's win probability over the game for the eval chart."""
+        if not analysis:
+            return
+        black_win = (
+            analysis["winProb"] if analysis["player"] == 1 else 1.0 - analysis["winProb"]
+        )
+        move = self.state.moves_played
+        self.eval_history = [e for e in self.eval_history if e["move"] != move]
+        self.eval_history.append({"move": move, "blackWinProb": black_win})
+
+    def _search_policy(self) -> tuple[int, dict]:
+        """Run a search and export its internals for visualisation.
+
+        The analysis describes the position *before* the chosen move is played:
+        network priors (intuition), MCTS visit distribution (search result),
+        per-move Q values, root value and the principal variation.
+        """
+        start = time.monotonic()
         root = self._mcts.search(self.state, add_exploration_noise=False)
+        elapsed_ms = (time.monotonic() - start) * 1000.0
         if not root.children:
-            return -1, []
-        policy = visit_count_policy(root, self.state.action_size, temperature=0.0)
-        action = int(policy.argmax())
-        total_visits = sum(float(c.visit_count) for c in root.children.values()) or 1.0
-        ranked = sorted(root.children.items(), key=lambda kv: kv[1].visit_count, reverse=True)[:8]
-        policy_rows = [
+            return -1, {}
+        size = self.state.size
+        action_size = self.state.action_size
+        items = list(root.children.items())
+        total_visits = sum(child.visit_count for _, child in items) or 1
+
+        visit_map = [0.0] * action_size
+        prior_map = [0.0] * action_size
+        q_map: list[float | None] = [None] * action_size
+        for a, child in items:
+            visit_map[a] = child.visit_count / total_visits
+            prior_map[a] = float(child.raw_prior)
+            if child.visit_count > 0:
+                q_map[a] = float(-child.value)  # mover's perspective
+
+        action = max(items, key=lambda kv: kv[1].visit_count)[0]
+        ranked = sorted(items, key=lambda kv: kv[1].visit_count, reverse=True)[:8]
+        candidates = [
             {
-                "row": self.state.action_to_coord(a)[0],
-                "col": self.state.action_to_coord(a)[1],
-                "visits": float(c.visit_count),
-                "share": float(c.visit_count) / total_visits,
+                "row": a // size,
+                "col": a % size,
+                "visits": int(child.visit_count),
+                "share": child.visit_count / total_visits,
+                "prior": float(child.raw_prior),
+                "q": float(-child.value) if child.visit_count > 0 else None,
                 "selected": a == action,
             }
-            for a, c in ranked
+            for a, child in ranked
         ]
-        return action, policy_rows
+
+        pv = []
+        node = root
+        while node.expanded and len(pv) < 8:
+            pv_action, pv_child = max(
+                node.children.items(), key=lambda kv: kv[1].visit_count
+            )
+            if pv_child.visit_count == 0:
+                break
+            pv.append({"row": pv_action // size, "col": pv_action % size})
+            node = pv_child
+
+        analysis = {
+            "player": self.state.current_player,
+            "moveNumber": self.state.moves_played,
+            "rootValue": float(root.value),
+            "winProb": (float(root.value) + 1.0) / 2.0,
+            "simulations": int(root.visit_count),
+            "elapsedMs": elapsed_ms,
+            "visitMap": visit_map,
+            "priorMap": prior_map,
+            "qMap": q_map,
+            "candidates": candidates,
+            "pv": pv,
+        }
+        return action, analysis
 
     def snapshot(self) -> dict:
         return {
@@ -194,8 +259,9 @@ class GameSession:
             "winner": self.state.winner,
             "movesPlayed": self.state.moves_played,
             "lastMove": self.state.last_move,
-            "history": self.history[-20:],
-            "aiPolicy": self.last_ai_policy,
+            "history": self.history[-30:],
+            "analysis": self.last_analysis,
+            "evalHistory": sorted(self.eval_history, key=lambda e: e["move"]),
             "policySource": self.policy_source,
             "policyPlayer": self.policy_player,
             "canUndo": bool(self.undo_stack),
@@ -308,7 +374,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("checkpoint", type=Path)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--simulations", type=int, default=64)
+    parser.add_argument("--simulations", type=int, default=256)
     parser.add_argument("--device", default="auto")
     return parser
 

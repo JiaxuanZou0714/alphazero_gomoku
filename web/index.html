@@ -1,84 +1,117 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Gomoku AI Board</title>
+    <title>AlphaZero 五子棋 · 内部视角</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="app-shell">
-      <section class="board-pane" aria-label="Gomoku board">
+      <section class="board-pane" aria-label="棋盘">
         <div class="topbar">
           <div>
-            <p class="eyebrow">10x10 Gomoku</p>
-            <h1>AlphaZero sparring board</h1>
+            <p class="eyebrow">10×10 Gomoku · Self-play trained</p>
+            <h1>AlphaZero 五子棋 <span class="thin">内部视角</span></h1>
           </div>
-          <div class="status-pill" id="statusPill">Loading</div>
+          <div class="status-pill" id="statusPill">加载中</div>
         </div>
 
-        <div class="board-wrap">
-          <div class="coordinates columns" id="colCoords"></div>
-          <div class="board-row">
-            <div class="coordinates rows" id="rowCoords"></div>
-            <div class="board" id="board" aria-label="Board" role="grid"></div>
+        <div class="board-area">
+          <div class="eval-bar" title="黑方胜率（来自最近一次搜索）">
+            <div class="eval-black" id="evalBlack"></div>
+            <span class="eval-label" id="evalLabel">—</span>
           </div>
+          <div class="board-wrap">
+            <div class="coordinates columns" id="colCoords"></div>
+            <div class="board-row">
+              <div class="coordinates rows" id="rowCoords"></div>
+              <div class="board" id="board" aria-label="棋盘" role="grid"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="overlay-controls">
+          <div class="segmented overlay-seg" role="group" aria-label="叠加层">
+            <button class="segment active" data-overlay="none" type="button">纯净棋盘</button>
+            <button class="segment" data-overlay="search" type="button">搜索分布</button>
+            <button class="segment" data-overlay="prior" type="button">网络先验</button>
+          </div>
+          <label class="pv-toggle">
+            <input type="checkbox" id="pvToggle" />
+            推演线 (PV)
+          </label>
+          <span class="overlay-note" id="overlayNote">尚无分析数据</span>
         </div>
       </section>
 
-      <aside class="side-panel" aria-label="Game controls">
+      <aside class="side-panel" aria-label="控制与分析">
         <section class="panel-section">
           <div class="section-heading">
-            <span>Side</span>
-            <strong id="sideLabel">Black</strong>
+            <span>对局</span>
+            <strong id="sideLabel">执黑</strong>
           </div>
-          <div class="segmented" role="group" aria-label="Choose side">
-            <button class="segment active" data-side="black" type="button">Black</button>
-            <button class="segment" data-side="white" type="button">White</button>
+          <div class="segmented" role="group" aria-label="选边">
+            <button class="segment active" data-side="black" type="button">我执黑</button>
+            <button class="segment" data-side="white" type="button">我执白</button>
           </div>
-        </section>
-
-        <section class="panel-section">
-          <div class="section-heading">
-            <span>Search</span>
-            <strong><span id="simValue">64</span> sims</strong>
+          <div class="sim-row">
+            <span class="sim-caption">搜索量</span>
+            <strong><span id="simValue">256</span> sims</strong>
           </div>
-          <input id="simSlider" type="range" min="8" max="160" step="8" value="64" />
-          <div class="ticks">
-            <span>fast</span>
-            <span>strong</span>
-          </div>
-        </section>
-
-        <section class="panel-section actions">
-          <button class="primary" id="newGame" type="button">New game</button>
-          <button class="secondary" id="undo" type="button">Undo</button>
-          <button class="secondary" id="analyze" type="button">Analyze</button>
-          <button class="secondary" id="refresh" type="button">Refresh</button>
-        </section>
-
-        <section class="panel-section stats">
-          <div>
-            <span>Moves</span>
-            <strong id="moves">0</strong>
-          </div>
-          <div>
-            <span>Turn</span>
-            <strong id="turn">Black</strong>
+          <input id="simSlider" type="range" min="32" max="512" step="32" value="256" />
+          <div class="ticks"><span>快</span><span>强</span></div>
+          <div class="actions">
+            <button class="primary" id="newGame" type="button">新对局</button>
+            <button class="secondary" id="undo" type="button">悔棋</button>
+            <button class="secondary" id="analyze" type="button">分析局面</button>
           </div>
         </section>
 
         <section class="panel-section">
           <div class="section-heading">
-            <span>AI candidates</span>
+            <span>局面评估</span>
+            <strong id="evalSource">—</strong>
+          </div>
+          <div class="eval-readout">
+            <div class="eval-big">
+              <span id="winProb">—</span>
+              <small>黑方胜率</small>
+            </div>
+            <div class="eval-meta">
+              <div><span>模拟</span><strong id="statSims">—</strong></div>
+              <div><span>耗时</span><strong id="statTime">—</strong></div>
+              <div><span>手数</span><strong id="moves">0</strong></div>
+              <div><span>轮到</span><strong id="turn">黑</strong></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading">
+            <span>胜率走势</span>
+            <strong class="muted-note">黑方视角</strong>
+          </div>
+          <canvas id="evalChart" width="280" height="110"></canvas>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading">
+            <span>搜索候选</span>
             <strong id="policyCount">0</strong>
           </div>
-          <ol class="policy-list" id="policyList"></ol>
+          <table class="cand-table" id="candTable">
+            <thead>
+              <tr><th>着法</th><th>访问</th><th>占比</th><th>先验</th><th>胜率</th></tr>
+            </thead>
+            <tbody id="candBody"></tbody>
+          </table>
+          <p class="hint">先验 = 网络直觉；占比 = 搜索后的结论。两者差距越大，说明搜索"纠正"了直觉。</p>
         </section>
 
         <section class="panel-section history-section">
           <div class="section-heading">
-            <span>Recent moves</span>
+            <span>对局记录</span>
             <strong id="historyCount">0</strong>
           </div>
           <ol class="history-list" id="historyList"></ol>
