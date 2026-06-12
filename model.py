@@ -33,7 +33,9 @@ class ResidualBlock(nn.Module):
             else None
         )
         # KataGo global pooling: broadcast global board context into every cell.
-        # avg+max pool -> Linear -> sigmoid gate. Critical for Gomoku threat detection.
+        # avg+max pool -> Linear -> additive per-channel bias. KataGo adds the
+        # pooled features as biases rather than multiplying by a sigmoid gate,
+        # which would attenuate the signal across many stacked blocks.
         self.gp_fc = nn.Linear(channels * 2, channels) if use_global_pool else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -42,12 +44,12 @@ class ResidualBlock(nn.Module):
         x = self.bn2(self.conv2(x))
         if self.se is not None:
             x = x * self.se(x)
-        x = F.relu(x + residual)
         if self.gp_fc is not None:
             g_avg = x.mean(dim=(2, 3))
             g_max = x.amax(dim=(2, 3))
-            gate = torch.sigmoid(self.gp_fc(torch.cat([g_avg, g_max], dim=1)))
-            x = x * gate.unsqueeze(-1).unsqueeze(-1)
+            bias = self.gp_fc(torch.cat([g_avg, g_max], dim=1))
+            x = x + bias.unsqueeze(-1).unsqueeze(-1)
+        x = F.relu(x + residual)
         return x
 
 

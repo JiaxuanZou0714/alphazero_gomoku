@@ -1,6 +1,6 @@
 # 10x10 AlphaZero 五子棋
 
-这是一个面向 `10x10` 棋盘的 AlphaZero 风格五子棋训练项目，并移植了多项 [KataGo](https://github.com/lightvector/KataGo) 的训练改进。当前仓库包含训练代码、网页对弈界面、一次 4 卡 A100 训练日志、训练曲线图，以及最新保留的 checkpoint：
+这是一个面向 `10x10` 棋盘的 AlphaZero 风格五子棋训练项目，并移植了多项 [KataGo](https://github.com/lightvector/KataGo) 的训练改进。当前仓库包含训练代码、单元测试、网页对弈界面、训练曲线图，以及最新保留的 checkpoint：
 
 ```text
 outputs/checkpoints/a100-4-prod-v3/gomoku10_iter_0030.pt
@@ -26,7 +26,7 @@ utils.py       公共工具（resolve_device, load_model）
 play.py        命令行人机对弈
 web_play.py    本地网页对弈服务
 web/           前端棋盘界面
-logs/          训练日志
+tests/         单元测试（规则、MCTS、训练组件）
 outputs/       checkpoint、metrics、plots
 ```
 
@@ -38,7 +38,7 @@ outputs/       checkpoint、metrics、plots
 
 | 改进 | 参数 | 说明 |
 |------|------|------|
-| 全局池化 | `use_global_pool` | 残差块末尾 avg+max 池化 → sigmoid gate，向每个格子广播全局棋盘信息 |
+| 全局池化 | `use_global_pool` | 残差块内 avg+max 池化 → Linear → 加性通道 bias（KataGo 风格），向每个格子广播全局棋盘信息；`a100-4` 预设用它替代 SE |
 | 辅助软策略头 | `use_soft_policy` + `soft_policy_loss_weight` | 第二个 policy head，训练目标 π^(1/T)，权重约 8×，加速学习非最优落点 |
 
 ### MCTS
@@ -48,13 +48,19 @@ outputs/       checkpoint、metrics、plots
 | 根节点策略温度 | `mcts_root_policy_temp` | 展开根节点前对先验 logits 除以温度，避免先验过早锐化 |
 | 形状化 Dirichlet 噪声 | `mcts_shaped_dirichlet` | 先验高于中位数的落点用更高 alpha，更有针对性地探索潜力走法 |
 | 动态方差缩放 cPUCT | `mcts_dynamic_cpuct` | `c_puct` 乘以 `sqrt(实证价值方差)`，自适应探索-利用平衡 |
+| FPU reduction | `mcts_fpu_reduction` | 未访问子节点估值 = 父节点估值 − fpu·sqrt(已访问先验质量)，替代过于乐观的 Q=0 初始化 |
+| 强制访问 + 目标剪枝 | `mcts_forced_playouts` + `mcts_forced_playout_k` | 根节点每个子节点保底 `sqrt(k·prior·N)` 次访问；生成策略目标时剪掉 PUCT 本身不会花的强制访问 |
+| 搜索树复用 | `selfplay_tree_reuse` | 自我对弈相邻两步间复用所选子树，节省大量模拟 |
 
-### 训练数据
+### 自我对弈与训练数据
 
 | 改进 | 参数 | 说明 |
 |------|------|------|
-| 惊喜加权采样 | `surprise_weighting` | 按 KL(先验‖MCTS目标) 加权 replay 采样，重点训练网络盲区 |
-| 短期价值目标 | `mcts_value_weight` | `target = (1-w) * 终局胜负 + w * MCTS估值`，降低纯终局标签的高方差 |
+| Playout cap randomization | `playout_cap_randomization` + `full_search_prob` + `fast_simulations` | 每步以概率 p 做全量搜索（产生策略目标），否则做小搜索（只产生价值目标），大幅提高自对弈吞吐 |
+| 策略目标/温度解耦 | （内置） | 训练目标始终是 τ=1 的访问分布；采样温度只影响实际落子，后期目标不再塌缩成 one-hot |
+| 惊喜加权采样 | `surprise_weighting` | 按 KL(无噪声先验‖MCTS目标) 加权 replay 采样，重点训练网络盲区；KL 随 replay 一起持久化 |
+| 短期价值目标 | `mcts_value_weight` | `target = (1-w) * 终局胜负 + w * MCTS根节点估值`，降低纯终局标签的高方差 |
+| 训练时对称增强 | `augment_symmetries` | 每个 batch 样本独立施加随机二面体对称变换；replay 只存原始局面，同样内存下独立局面多 8 倍 |
 
 ## 当前模型
 
@@ -99,17 +105,17 @@ python -m alphazero_gomoku.train \
   --metrics-path alphazero_gomoku/outputs/metrics/a100-4-prod-v3.jsonl
 ```
 
-`a100-4` 预设使用更大的 SE-ResNet + 全局池化 + 软策略头、固定每轮训练步数、cosine learning-rate schedule、16 个并行自我对弈 worker，以及全套 KataGo MCTS 和训练改进。
+`a100-4` 预设使用更大的 ResNet + 全局池化 + 软策略头、固定每轮训练步数、cosine learning-rate schedule、16 个并行自我对弈 worker，以及全套 KataGo MCTS 和训练改进。
 
-从已有 checkpoint 继续训练：
+从已有 checkpoint 继续训练（checkpoint 必须由相同网络架构配置产出；仓库里保留的 `a100-4-prod-v3` 是旧版架构，不能用新预设 resume）：
 
 ```bash
 python -m alphazero_gomoku.train \
   --preset a100-4 \
-  --resume alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_iter_0030.pt \
-  --checkpoint-dir alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3 \
-  --replay-path alphazero_gomoku/outputs/replay/a100-4-prod-v3_replay.pt \
-  --metrics-path alphazero_gomoku/outputs/metrics/a100-4-prod-v3.jsonl
+  --resume <checkpoint 路径> \
+  --checkpoint-dir <相同目录> \
+  --replay-path <相同 replay 路径> \
+  --metrics-path <相同 metrics 路径>
 ```
 
 ## 命令行对弈
@@ -145,13 +151,7 @@ http://127.0.0.1:8765
 
 ## 训练曲线
 
-下面的图来自：
-
-```text
-logs/a100_4_prod_v3_stable_20260610_194644.log
-```
-
-日志中第 `1-30` 轮有完整的 self-play、train 和 eval summary；第 `31` 轮只有部分 self-play 进度，没有完整训练 summary，因此下图只统计完整的 `1-30` 轮。
+下面的图来自 `a100-4-prod-v3` 训练（旧版代码，对应原始日志已从仓库移除）。该日志第 `1-30` 轮有完整的 self-play、train 和 eval summary，因此下图只统计完整的 `1-30` 轮。
 
 ### 总览
 
@@ -214,12 +214,12 @@ outputs/plots/a100_4_prod_v3_stable_20260610_194644/metrics_from_log.csv
 
 ## 测试
 
-```bash
-python -m compileall -q alphazero_gomoku
-```
-
-如果后续补充 `tests/` 目录，也可以使用：
+从项目父目录运行：
 
 ```bash
-python -m unittest discover tests
+cd /Users/jiaxuanzou/Documents
+
+python -m unittest discover -s alphazero_gomoku/tests -t .
 ```
+
+覆盖内容：五子棋规则与终局判定、MCTS 必胜局面与根节点估值符号、策略目标剪枝、树复用、随机对称增强的状态-策略一致性、训练循环边界条件、replay v2 格式与旧格式兼容加载。

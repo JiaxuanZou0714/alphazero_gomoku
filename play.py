@@ -47,6 +47,7 @@ def main() -> None:
                     str(cfg.get("amp_dtype", "bf16")) if bool(cfg.get("amp", True)) else "none",
                 )
             ),
+            fpu_reduction=float(cfg.get("mcts_fpu_reduction", 0.0) or 0.0),
         ),
         device=args.device,
     )

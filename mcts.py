@@ -25,11 +25,15 @@ class MCTSConfig:
     root_policy_temp: float = 1.0    # >1 flattens root priors, improves early exploration
     shaped_dirichlet: bool = False   # per-action alpha based on prior rank
     dynamic_cpuct: bool = False      # scale c_puct by sqrt(empirical value variance)
+    fpu_reduction: float = 0.0       # unvisited child Q = parent Q - fpu * sqrt(visited prior mass)
+    forced_playouts: bool = False    # minimum playouts for root children during noised searches
+    forced_playout_k: float = 2.0    # n_forced = sqrt(k * prior * root_visits)
 
 
 @dataclass
 class Node:
     prior: float
+    raw_prior: float = 0.0          # prior before Dirichlet noise (for surprise weighting)
     visit_count: int = 0
     value_sum: float = 0.0
     value_sq_sum: float = 0.0       # for dynamic cPUCT variance estimation
@@ -65,26 +69,48 @@ class MCTS:
         self.model = model
         self.config = config or MCTSConfig()
         self.device = torch.device(device)
-        self.rng = rng or random.Random()
+        # Derive from the global random module so set_seed() makes searches
+        # reproducible (tie-breaks and Dirichlet noise included).
+        self.rng = rng or random.Random(random.getrandbits(64))
+        self.np_rng = np.random.default_rng(self.rng.getrandbits(64))
 
-    def search(self, state: GomokuState, add_exploration_noise: bool = False) -> Node:
+    def search(
+        self,
+        state: GomokuState,
+        add_exploration_noise: bool = False,
+        reuse_root: Node | None = None,
+        simulations: int | None = None,
+    ) -> Node:
+        """Run MCTS from `state`.
+
+        reuse_root: subtree of a previous search rooted at `state` (tree reuse);
+            its accumulated visits are kept and `simulations` new ones are added.
+        simulations: override config.simulations for this call (playout cap
+            randomization runs cheap and full searches with one config).
+        """
         if state.is_terminal:
             raise ValueError("cannot search from a terminal state")
 
-        root = Node(prior=1.0)
-        self._expand(root, state, is_root=True)
+        sims = self.config.simulations if simulations is None else max(1, simulations)
+        if reuse_root is not None and reuse_root.expanded:
+            root = reuse_root
+        else:
+            root = Node(prior=1.0, raw_prior=1.0)
+            self._expand(root, state, is_root=True)
         if add_exploration_noise:
             self._add_dirichlet_noise(root)
+        use_forced = add_exploration_noise and self.config.forced_playouts
 
         simulations_done = 0
-        while simulations_done < self.config.simulations:
+        while simulations_done < sims:
             batch_size = min(
                 max(1, self.config.eval_batch_size),
-                self.config.simulations - simulations_done,
+                sims - simulations_done,
             )
             leaves = []
             seen_leaf_nodes: set[int] = set()
             attempts = 0
+            terminal_backups = 0
             while len(leaves) < batch_size and attempts < batch_size * 4:
                 attempts += 1
                 node = root
@@ -92,10 +118,22 @@ class MCTS:
                 search_path = [node]
 
                 while node.expanded:
-                    action, node = self._select_child(node)
+                    forced = use_forced and node is root
+                    action, node = self._select_child(node, forced=forced)
                     scratch = scratch.apply(action)
                     search_path.append(node)
 
+                if scratch.is_terminal:
+                    # Terminal values are exact: backpropagate immediately and
+                    # allow repeats within a batch instead of wasting attempts.
+                    self._backpropagate(
+                        search_path, scratch.terminal_value_for_current_player()
+                    )
+                    terminal_backups += 1
+                    simulations_done += 1
+                    if simulations_done >= sims:
+                        break
+                    continue
                 if id(node) in seen_leaf_nodes:
                     continue
                 seen_leaf_nodes.add(id(node))
@@ -103,21 +141,65 @@ class MCTS:
                 leaves.append((search_path, node, scratch))
 
             if not leaves:
-                break
-            pending_states = [scratch for _, _, scratch in leaves if not scratch.is_terminal]
-            evaluations = iter(self._evaluate_batch(pending_states)) if pending_states else iter(())
-
-            for search_path, node, scratch in leaves:
+                if terminal_backups == 0:
+                    break
+                continue
+            evaluations = self._evaluate_batch([scratch for _, _, scratch in leaves])
+            for (search_path, node, scratch), (policy, value) in zip(leaves, evaluations):
                 self._remove_virtual_visits(search_path)
-                if scratch.is_terminal:
-                    value = scratch.terminal_value_for_current_player()
-                else:
-                    policy, value = next(evaluations)
-                    self._expand_with_policy(node, scratch, policy)
+                self._expand_with_policy(node, scratch, policy)
                 self._backpropagate(search_path, value)
             simulations_done += len(leaves)
 
         return root
+
+    def policy_target(self, root: Node, action_size: int, pruned: bool = True) -> np.ndarray:
+        """τ=1 visit distribution for policy training.
+
+        With forced playouts enabled and pruned=True, applies KataGo policy
+        target pruning: forced visits that PUCT itself would not have spent are
+        subtracted so the noise-driven exploration does not pollute the target.
+        """
+        visits = np.zeros(action_size, dtype=np.float32)
+        for action, child in root.children.items():
+            visits[action] = child.visit_count
+        if pruned and self.config.forced_playouts and root.children:
+            self._prune_forced_playouts(root, visits)
+        total = visits.sum()
+        if total <= 0:
+            return visits
+        return visits / total
+
+    def _prune_forced_playouts(self, root: Node, visits: np.ndarray) -> None:
+        items = [(a, c) for a, c in root.children.items() if c.visit_count > 0]
+        if len(items) < 2:
+            return
+        parent_visits = max(1, root.visit_count)
+        sqrt_parent = math.sqrt(parent_visits)
+        c_val = self.config.c_puct
+        if self.config.dynamic_cpuct:
+            c_val *= math.sqrt(max(0.25, root.value_var))
+        best_action, best_child = max(items, key=lambda kv: kv[1].visit_count)
+        best_urgency = (
+            -best_child.value
+            + c_val * best_child.prior * sqrt_parent / (1 + best_child.visit_count)
+        )
+        k = self.config.forced_playout_k
+        for action, child in items:
+            if action == best_action:
+                continue
+            v = child.visit_count
+            n_forced = math.sqrt(k * child.prior * parent_visits)
+            q = -child.value
+            if best_urgency <= q:
+                continue  # visits justified by Q alone, nothing to prune
+            # Smallest visit count at which this child's PUCT urgency still does
+            # not exceed the most-visited child's: those visits are legitimate.
+            min_v = c_val * child.prior * sqrt_parent / (best_urgency - q) - 1.0
+            new_v = max(v - n_forced, min_v)
+            if new_v < 1.0:
+                new_v = 0.0
+            visits[action] = min(float(v), new_v)
 
     def _expand(self, node: Node, state: GomokuState, is_root: bool = False) -> float:
         policy, value = self._evaluate(state, apply_root_temp=is_root)
@@ -127,7 +209,8 @@ class MCTS:
     def _expand_with_policy(self, node: Node, state: GomokuState, policy: np.ndarray) -> None:
         legal_actions = state.legal_actions()
         for action in legal_actions:
-            node.children[int(action)] = Node(prior=float(policy[action]))
+            prior = float(policy[action])
+            node.children[int(action)] = Node(prior=prior, raw_prior=prior)
 
     def _evaluate(self, state: GomokuState, apply_root_temp: bool = False) -> tuple[np.ndarray, float]:
         return self._evaluate_batch([state], apply_root_temp=apply_root_temp)[0]
@@ -191,24 +274,50 @@ class MCTS:
         for node in search_path:
             node.visit_count -= 1
 
-    def _select_child(self, node: Node) -> tuple[int, Node]:
+    def _select_child(self, node: Node, forced: bool = False) -> tuple[int, Node]:
+        parent_visits = max(1, node.visit_count)
+
+        if forced:
+            # KataGo forced playouts: root children below their minimum playout
+            # count are searched first (pick the largest deficit).
+            k = self.config.forced_playout_k
+            best_deficit = 1.0e-9
+            candidates: list[tuple[int, Node]] = []
+            for action, child in node.children.items():
+                deficit = math.sqrt(k * child.prior * parent_visits) - child.visit_count
+                if deficit > best_deficit:
+                    best_deficit = deficit
+                    candidates = [(action, child)]
+                elif candidates and deficit == best_deficit:
+                    candidates.append((action, child))
+            if candidates:
+                return self.rng.choice(candidates)
+
         best_score = -float("inf")
         best: list[tuple[int, Node]] = []
-        parent_visits = max(1, node.visit_count)
+        sqrt_parent = math.sqrt(parent_visits)
 
         # Dynamic cPUCT: scale by sqrt of empirical value variance to adapt exploration
         c = self.config.c_puct
         if self.config.dynamic_cpuct:
             c = c * math.sqrt(max(0.25, node.value_var))
 
-        for action, child in node.children.items():
-            prior_score = (
-                c
-                * child.prior
-                * math.sqrt(parent_visits)
-                / (child.visit_count + 1)
+        # KataGo first-play urgency: estimate unvisited children slightly below
+        # the parent's value instead of a flat 0, which is too optimistic for
+        # the losing side and too pessimistic for the winning side.
+        fpu = self.config.fpu_reduction
+        if fpu > 0:
+            visited_mass = sum(
+                child.prior for child in node.children.values() if child.visit_count > 0
             )
-            score = -child.value + prior_score
+            fpu_value = node.value - fpu * math.sqrt(visited_mass)
+        else:
+            fpu_value = 0.0
+
+        for action, child in node.children.items():
+            prior_score = c * child.prior * sqrt_parent / (child.visit_count + 1)
+            q = -child.value if child.visit_count > 0 else fpu_value
+            score = q + prior_score
             if score > best_score:
                 best_score = score
                 best = [(action, child)]
@@ -221,7 +330,6 @@ class MCTS:
         if not root.children:
             return
         actions = list(root.children)
-        rng = np.random.default_rng()
 
         if self.config.shaped_dirichlet:
             # KataGo shaped Dirichlet: actions above median prior get higher alpha
@@ -233,9 +341,9 @@ class MCTS:
                 self.config.dirichlet_alpha * 2.0,
                 self.config.dirichlet_alpha * 0.5,
             )
-            noise = rng.dirichlet(alphas)
+            noise = self.np_rng.dirichlet(alphas)
         else:
-            noise = rng.dirichlet([self.config.dirichlet_alpha] * len(actions))
+            noise = self.np_rng.dirichlet([self.config.dirichlet_alpha] * len(actions))
 
         frac = self.config.dirichlet_fraction
         for action, sample in zip(actions, noise):

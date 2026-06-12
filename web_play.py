@@ -62,6 +62,7 @@ class GameSession:
                     max(1, simulations),
                 ),
                 amp_dtype=amp_dtype,
+                fpu_reduction=float(self.cfg.get("mcts_fpu_reduction", 0.0) or 0.0),
             ),
             device=self.device,
         )
@@ -259,7 +260,7 @@ class WebPlayHandler(BaseHTTPRequestHandler):
         if path in ("", "/"):
             path = "/index.html"
         requested = (self.static_root / path.lstrip("/")).resolve()
-        if self.static_root not in requested.parents and requested != self.static_root:
+        if not requested.is_relative_to(self.static_root):
             self._send_error(HTTPStatus.FORBIDDEN, "forbidden")
             return
         if not requested.is_file():
@@ -317,7 +318,7 @@ def main() -> None:
     device = resolve_device(args.device)
     model, cfg = load_model(args.checkpoint, device)
     WebPlayHandler.session = GameSession(model, cfg, device, args.simulations)
-    WebPlayHandler.static_root = Path(__file__).parent / "web"
+    WebPlayHandler.static_root = (Path(__file__).parent / "web").resolve()
     server = ThreadingHTTPServer((args.host, args.port), WebPlayHandler)
     print(f"serving http://{args.host}:{args.port}")
     print(f"device={device} checkpoint={args.checkpoint}")

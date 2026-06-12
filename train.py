@@ -26,7 +26,10 @@ from .mcts import MCTS, MCTSConfig, visit_count_policy
 from .model import PolicyValueNet, build_model_from_config, model_kwargs_from_config
 from .torch_compat import tensor_from_array
 
-Example = tuple[np.ndarray, np.ndarray, float]
+# (encoded_state, mcts_policy, value, policy_weight). policy_weight is 0 for
+# positions from cheap searches (playout cap randomization): they only train
+# the value head.
+Example = tuple[np.ndarray, np.ndarray, float, float]
 
 
 @dataclass
@@ -73,7 +76,14 @@ class TrainConfig:
     mcts_root_policy_temp: float = 1.0  # >1 flattens root priors for better early exploration
     mcts_shaped_dirichlet: bool = False # shaped Dirichlet noise by prior rank
     mcts_dynamic_cpuct: bool = False    # scale c_puct by empirical value variance
-    augment_symmetries: bool = True
+    mcts_fpu_reduction: float = 0.0     # KataGo FPU: unvisited child Q = parent Q - fpu * sqrt(visited mass)
+    mcts_forced_playouts: bool = False  # KataGo: forced playouts + policy target pruning at the root
+    mcts_forced_playout_k: float = 2.0  # n_forced = sqrt(k * prior * root_visits)
+    playout_cap_randomization: bool = False  # KataGo: mix cheap (value-only) and full (policy) searches
+    full_search_prob: float = 0.25      # probability of a full search per move when PCR is on
+    fast_simulations: int = 0           # simulations for cheap searches (0 = simulations // 4)
+    selfplay_tree_reuse: bool = True    # reuse the chosen subtree between self-play moves
+    augment_symmetries: bool = True     # random dihedral symmetry per sample at train time
     replay_path: str = ""
     replay_save_interval: int = 5
     eval_interval: int = 0
@@ -238,8 +248,8 @@ def preset_config(name: str) -> TrainConfig:
         cfg.policy_channels = 16
         cfg.value_channels = 8
         cfg.value_hidden = 512
-        cfg.use_se = True
-        cfg.use_global_pool = True          # KataGo: global context injection
+        cfg.use_se = False                  # global pooling replaces SE (both are channel-wise context)
+        cfg.use_global_pool = True          # KataGo: global context injection (additive pooling bias)
         cfg.use_soft_policy = True          # KataGo: auxiliary soft policy head
         cfg.soft_policy_loss_weight = 8.0   # KataGo: 8x weight on soft policy loss
         cfg.surprise_weighting = True       # KataGo: prioritise high-KL replay samples
@@ -247,6 +257,11 @@ def preset_config(name: str) -> TrainConfig:
         cfg.mcts_root_policy_temp = 1.1     # KataGo: flatten root priors slightly
         cfg.mcts_shaped_dirichlet = True    # KataGo: shaped Dirichlet by prior rank
         cfg.mcts_dynamic_cpuct = True       # KataGo: variance-scaled exploration
+        cfg.mcts_fpu_reduction = 0.2        # KataGo: first-play urgency reduction
+        cfg.mcts_forced_playouts = True     # KataGo: forced playouts + policy target pruning
+        cfg.playout_cap_randomization = True  # KataGo: cheap value-only searches most moves
+        cfg.full_search_prob = 0.25
+        cfg.fast_simulations = 96
         cfg.checkpoint_dir = "alphazero_gomoku/outputs/checkpoints/a100-4"
         cfg.replay_path = "alphazero_gomoku/outputs/replay/a100-4_replay.pt"
         cfg.metrics_path = "alphazero_gomoku/outputs/metrics/a100-4.jsonl"
@@ -426,26 +441,54 @@ def load_resume_checkpoint(
     return iteration
 
 
-def save_replay(replay: deque[Example], path: str) -> None:
+def save_replay(replay: deque[Example], kl_buffer: deque[float], path: str) -> None:
     if not path:
         return
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(list(replay), target)
+    torch.save({"version": 2, "examples": list(replay), "kl": list(kl_buffer)}, target)
     print(f"replay_saved path={target} examples={len(replay)}", flush=True)
 
 
-def load_replay(cfg: TrainConfig) -> deque[Example]:
+def load_replay(cfg: TrainConfig) -> tuple[deque[Example], deque[float]]:
+    """Load the replay buffer and its aligned per-sample KL surprises.
+
+    The KL buffer is persisted alongside the examples so surprise weighting
+    keeps working across resumes instead of silently turning off until the
+    buffers refill.
+    """
     replay: deque[Example] = deque(maxlen=cfg.replay_size)
+    kl_buffer: deque[float] = deque(maxlen=cfg.replay_size)
     if not cfg.replay_path:
-        return replay
+        return replay, kl_buffer
     path = Path(cfg.replay_path)
     if not path.exists():
-        return replay
+        return replay, kl_buffer
     loaded = load_torch(path, map_location="cpu")
-    replay.extend(loaded[-cfg.replay_size:])
+    if isinstance(loaded, dict):
+        examples = loaded.get("examples", [])
+        kls = loaded.get("kl", [])
+    else:  # legacy v1 format: bare list of (state, policy, value)
+        examples = loaded
+        kls = []
+    examples = examples[-cfg.replay_size:]
+    examples = [
+        item if len(item) == 4 else (item[0], item[1], item[2], 1.0)
+        for item in examples
+    ]
+    replay.extend(examples)
+    if len(kls) >= len(examples):
+        kl_buffer.extend(kls[-len(examples):])
+    else:
+        kl_buffer.extend([0.0] * len(replay))
+        if cfg.surprise_weighting:
+            print(
+                "replay_warning kl_buffer_missing surprise weights reset to neutral "
+                "for loaded examples",
+                flush=True,
+            )
     print(f"replay_loaded path={path} examples={len(replay)}", flush=True)
-    return replay
+    return replay, kl_buffer
 
 
 def sample_action(policy: np.ndarray) -> int:
@@ -462,36 +505,36 @@ def policy_entropy(policy: np.ndarray) -> float:
     return float(-(probs * np.log(probs + 1.0e-12)).sum())
 
 
-def augment_examples(examples: list[Example], board_size: int) -> list[Example]:
-    """Apply all 8 dihedral symmetries to each example.
+def apply_random_symmetries(
+    states: torch.Tensor, policies: torch.Tensor, board_size: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply an independent random dihedral symmetry to each sample in a batch.
 
-    Vectorised: stacks all examples into two big arrays, applies each of the 8
-    transforms with a single numpy call, then returns a flat list.  This is
-    ~5-10x faster than the previous per-example Python loop.
+    Replaces the old 8x replay expansion: the buffer now stores raw examples
+    and the transform is applied at sampling time, so the buffer holds 8x more
+    unique positions for the same memory and the augmentation is effectively
+    infinite.
     """
-    if not examples:
-        return []
-    n = len(examples)
-    # (n, 2, H, W) and (n, H*W)
-    states = np.stack([e[0] for e in examples]).astype(np.float32)   # (n,2,H,W)
-    policies = np.stack([e[1] for e in examples]).astype(np.float32) # (n,H*W)
-    values = [e[2] for e in examples]
-
-    pol2d = policies.reshape(n, board_size, board_size)
-    augmented: list[Example] = []
-    for k in range(8):
-        # spatial transform (axes 2,3 for states; axes 1,2 for pol2d)
+    n = states.shape[0]
+    pol2d = policies.view(n, board_size, board_size)
+    out_states = states.clone()
+    out_pol = pol2d.clone()
+    ks = torch.randint(0, 8, (n,), device=states.device)
+    for k in range(1, 8):
+        idx = (ks == k).nonzero(as_tuple=True)[0]
+        if idx.numel() == 0:
+            continue
+        s = states[idx]
+        p = pol2d[idx]
         if k < 4:
-            ts = np.rot90(states,  k, axes=(2, 3))
-            tp = np.rot90(pol2d,   k, axes=(1, 2))
+            s = torch.rot90(s, k, dims=(2, 3))
+            p = torch.rot90(p, k, dims=(1, 2))
         else:
-            ts = np.flip(np.rot90(states,  k - 4, axes=(2, 3)), axis=3)
-            tp = np.flip(np.rot90(pol2d,   k - 4, axes=(1, 2)), axis=2)
-        ts = np.ascontiguousarray(ts, dtype=np.float32)
-        tp = np.ascontiguousarray(tp.reshape(n, -1), dtype=np.float32)
-        for i, v in enumerate(values):
-            augmented.append((ts[i], tp[i], v))
-    return augmented
+            s = torch.flip(torch.rot90(s, k - 4, dims=(2, 3)), dims=(3,))
+            p = torch.flip(torch.rot90(p, k - 4, dims=(1, 2)), dims=(2,))
+        out_states[idx] = s
+        out_pol[idx] = p
+    return out_states, out_pol.reshape(n, -1)
 
 
 def play_self_game(
@@ -501,54 +544,90 @@ def play_self_game(
 ) -> tuple[list[Example], list[float], dict[str, float]]:
     """Play one self-play game.
 
+    KataGo playout cap randomization: with probability full_search_prob a move
+    gets a full search (noise + forced playouts) and produces a policy target;
+    other moves get a cheap search and only train the value head
+    (policy_weight=0). The policy target is always the τ=1 visit distribution
+    (pruned of forced playouts); the sampling temperature only affects which
+    move is played.
+
     Returns:
-        examples: (encoded_state, mcts_policy, value) for each move
-        kl_surprises: KL(network_prior || MCTS_target) per move — used for
-            surprise-weighted replay sampling (KataGo)
+        examples: (encoded_state, policy_target, value, policy_weight) per move
+        kl_surprises: KL(raw_network_prior || MCTS_target) per move — used for
+            surprise-weighted replay sampling (KataGo); 0 for cheap searches
         stats: scalar diagnostics
     """
     mcts = MCTS(model, mcts_cfg, device=cfg.device)
     state = GomokuState.new(size=cfg.board_size, win_length=cfg.win_length)
-    history: list[tuple[np.ndarray, np.ndarray, int, float]] = []  # +mcts_value
+    history: list[tuple[np.ndarray, np.ndarray, int, float, float]] = []
     entropies: list[float] = []
     kl_surprises: list[float] = []
+    next_root = None
+    full_moves = 0
 
     while not state.is_terminal:
-        temperature = 1.0 if state.moves_played < cfg.temperature_moves else 0.0
-        root = mcts.search(state, add_exploration_noise=True)
-        policy = visit_count_policy(root, state.action_size, temperature)
-        if policy.sum() <= 0:
+        is_full = (not cfg.playout_cap_randomization) or (
+            random.random() < cfg.full_search_prob
+        )
+        simulations = cfg.simulations if is_full else max(1, cfg.fast_simulations)
+        root = mcts.search(
+            state,
+            add_exploration_noise=is_full,
+            reuse_root=next_root if cfg.selfplay_tree_reuse else None,
+            simulations=simulations,
+        )
+
+        target = mcts.policy_target(root, state.action_size, pruned=is_full)
+        if target.sum() <= 0:
             legal = state.legal_actions()
-            policy[legal] = 1.0 / len(legal)
-        policy = policy.astype(np.float32)
-        entropies.append(policy_entropy(policy))
+            target = np.zeros(state.action_size, dtype=np.float32)
+            target[legal] = 1.0 / len(legal)
+        target = target.astype(np.float32)
 
-        # KL(prior || MCTS target) — measures how surprising this position was
-        prior = np.array([root.children[a].prior for a in sorted(root.children)], dtype=np.float32)
-        mcts_p = np.array([policy[a] for a in sorted(root.children)], dtype=np.float32)
-        kl = float(np.sum(mcts_p * np.log((mcts_p + 1e-12) / (prior + 1e-12))))
-        kl_surprises.append(max(0.0, kl))
+        if is_full:
+            full_moves += 1
+            entropies.append(policy_entropy(target))
+            # KL(raw prior || MCTS target) on the pre-noise priors, so the
+            # surprise weight measures actual network blind spots, not noise
+            actions = sorted(root.children)
+            prior = np.array([root.children[a].raw_prior for a in actions], dtype=np.float32)
+            mcts_p = np.array([target[a] for a in actions], dtype=np.float32)
+            kl = float(np.sum(mcts_p * np.log((mcts_p + 1e-12) / (prior + 1e-12))))
+            kl_surprises.append(max(0.0, kl))
+        else:
+            kl_surprises.append(0.0)
 
-        # MCTS root value estimate (from current player's perspective)
-        mcts_value = float(-root.value) if root.visit_count > 0 else 0.0
+        # MCTS root value estimate (root.value is already from the current
+        # player's perspective: backprop negates per ply up to the root)
+        mcts_value = float(root.value) if root.visit_count > 0 else 0.0
 
-        history.append((state.encode(), policy, state.current_player, mcts_value))
-        state = state.apply(sample_action(policy))
+        history.append(
+            (state.encode(), target, state.current_player, mcts_value, 1.0 if is_full else 0.0)
+        )
+
+        temperature = 1.0 if state.moves_played < cfg.temperature_moves else 0.0
+        move_policy = visit_count_policy(root, state.action_size, temperature)
+        if move_policy.sum() <= 0:
+            move_policy = target
+        action = sample_action(move_policy)
+        next_root = root.children.get(action)
+        state = state.apply(action)
 
     examples: list[Example] = []
     w = cfg.mcts_value_weight
-    for encoded, policy, player, mcts_val in history:
+    for encoded, policy, player, mcts_val, policy_weight in history:
         if state.winner == 0:
             terminal_v = 0.0
         else:
             terminal_v = 1.0 if state.winner == player else -1.0
         # KataGo short-term value: blend terminal result with MCTS value estimate
         value = (1.0 - w) * terminal_v + w * mcts_val if w > 0 else terminal_v
-        examples.append((encoded.astype(np.float32), policy, float(value)))
+        examples.append((encoded.astype(np.float32), policy, float(value), policy_weight))
 
     stats = {
         "policy_entropy": float(np.mean(entropies)) if entropies else 0.0,
         "winner": float(state.winner if state.winner is not None else 0),
+        "full_search_rate": full_moves / max(1, len(history)),
     }
     return examples, kl_surprises, stats
 
@@ -562,7 +641,7 @@ def play_self_games_worker(
     worker_id: int,
     iteration: int = 0,
     progress_queue: object | None = None,
-) -> tuple[list[Example], list[int], dict[str, float], str]:
+) -> tuple[list[Example], list[float], list[int], dict[str, float], str]:
     limit_worker_threads()
     enable_fast_math()
     cfg = TrainConfig(**cfg_data)
@@ -578,6 +657,7 @@ def play_self_games_worker(
     lengths: list[int] = []
     entropies: list[float] = []
     winners: list[float] = []
+    full_search_rates: list[float] = []
     worker_start = time.monotonic()
     for game_index in range(1, games + 1):
         game_start = time.monotonic()
@@ -587,6 +667,7 @@ def play_self_games_worker(
         lengths.append(len(game_examples))
         entropies.append(game_stats["policy_entropy"])
         winners.append(game_stats["winner"])
+        full_search_rates.append(game_stats["full_search_rate"])
         if progress_queue is not None:
             progress_queue.put(
                 {
@@ -608,6 +689,8 @@ def play_self_games_worker(
         "black_win_rate": float(np.mean([winner == 1 for winner in winners])) if winners else 0.0,
         "white_win_rate": float(np.mean([winner == -1 for winner in winners])) if winners else 0.0,
         "draw_rate": float(np.mean([winner == 0 for winner in winners])) if winners else 0.0,
+        "full_search_rate": float(np.mean(full_search_rates)) if full_search_rates else 0.0,
+        "games": float(len(winners)),
     }
     return examples, kl_surprises, lengths, stats, device
 
@@ -625,17 +708,27 @@ def merge_stats(stats: list[dict[str, float]]) -> dict[str, float]:
             "black_win_rate": 0.0,
             "white_win_rate": 0.0,
             "draw_rate": 0.0,
+            "full_search_rate": 0.0,
         }
     if "winner" in stats[0]:
+        # per-game stats from the single-worker path
         winners = [item["winner"] for item in stats]
         return {
             "policy_entropy": float(np.mean([item["policy_entropy"] for item in stats])),
             "black_win_rate": float(np.mean([winner == 1 for winner in winners])),
             "white_win_rate": float(np.mean([winner == -1 for winner in winners])),
             "draw_rate": float(np.mean([winner == 0 for winner in winners])),
+            "full_search_rate": float(
+                np.mean([item.get("full_search_rate", 1.0) for item in stats])
+            ),
         }
-    keys = stats[0].keys()
-    return {key: float(np.mean([item[key] for item in stats])) for key in keys}
+    # per-worker stats: weight by the number of games each worker played
+    games = np.array([item.get("games", 1.0) for item in stats], dtype=np.float64)
+    keys = [key for key in stats[0] if key != "games"]
+    return {
+        key: float(np.average([item[key] for item in stats], weights=games))
+        for key in keys
+    }
 
 
 def collect_self_play_examples(
@@ -785,7 +878,8 @@ def replay_to_dataset(
     states = tensor_from_array(np.stack([item[0] for item in replay]), dtype=torch.float32)
     policies = tensor_from_array(np.stack([item[1] for item in replay]), dtype=torch.float32)
     values = torch.tensor([item[2] for item in replay], dtype=torch.float32)
-    dataset = TensorDataset(states, policies, values)
+    policy_weights = torch.tensor([item[3] for item in replay], dtype=torch.float32)
+    dataset = TensorDataset(states, policies, values, policy_weights)
     weights = None
     if kl_buffer is not None and len(kl_buffer) == len(replay):
         kl = np.array(list(kl_buffer), dtype=np.float32)
@@ -840,18 +934,29 @@ def train_epoch(
 
     steps_to_run = cfg.train_steps_per_iteration if cfg.train_steps_per_iteration > 0 else len(loader)
     loader_iter = iter(loader)
+    policy_samples = 0.0
     for _ in range(steps_to_run):
         try:
-            batch_states, batch_policies, batch_values = next(loader_iter)
+            batch_states, batch_policies, batch_values, batch_policy_weights = next(loader_iter)
         except StopIteration:
             if cfg.train_steps_per_iteration <= 0:
                 break
             loader_iter = iter(loader)
-            batch_states, batch_policies, batch_values = next(loader_iter)
+            try:
+                batch_states, batch_policies, batch_values, batch_policy_weights = next(loader_iter)
+            except StopIteration:
+                # drop_last=True with fewer examples than one batch: nothing to train on
+                print(
+                    "train_warning empty_loader "
+                    f"examples={len(dataset)} batch_size={cfg.batch_size}",
+                    flush=True,
+                )
+                break
 
         batch_states = batch_states.to(cfg.device, non_blocking=True)
         batch_policies = batch_policies.to(cfg.device, non_blocking=True)
         batch_values = batch_values.to(cfg.device, non_blocking=True)
+        batch_policy_weights = batch_policy_weights.to(cfg.device, non_blocking=True)
 
         if batch_values.min().item() < -1.001 or batch_values.max().item() > 1.001:
             raise RuntimeError(
@@ -863,6 +968,11 @@ def train_epoch(
             raise RuntimeError("non-finite policy or value labels in replay")
         if torch.any(torch.abs(policy_sums - 1.0) > 1.0e-3):
             batch_policies = batch_policies / policy_sums.clamp_min(1.0e-8).unsqueeze(1)
+
+        if cfg.augment_symmetries:
+            batch_states, batch_policies = apply_random_symmetries(
+                batch_states, batch_policies, cfg.board_size
+            )
 
         with autocast_ctx:
             logits, soft_logits, predicted_values = model(batch_states)
@@ -890,12 +1000,22 @@ def train_epoch(
             predicted_values = torch.nan_to_num(
                 predicted_values, nan=0.0, posinf=1.0, neginf=-1.0
             ).clamp(-1.0, 1.0)
+        # Policy losses and metrics only count full-search samples (policy_weight=1);
+        # value-only samples from cheap searches contribute zero weight.
+        pw = batch_policy_weights
+        policy_count = pw.sum().clamp_min(1.0)
         log_probs = F.log_softmax(logits, dim=1)
         pred_probs = F.softmax(logits, dim=1)
-        target_entropy = -(batch_policies * torch.log(batch_policies.clamp_min(1.0e-8))).sum(dim=1)
-        pred_entropy = -(pred_probs * torch.log(pred_probs.clamp_min(1.0e-8))).sum(dim=1)
-        policy_loss = -(batch_policies * log_probs).sum(dim=1).mean()
-        policy_kl = (batch_policies * (torch.log(batch_policies.clamp_min(1.0e-8)) - log_probs)).sum(dim=1).mean()
+        target_entropy_rows = -(batch_policies * torch.log(batch_policies.clamp_min(1.0e-8))).sum(dim=1)
+        pred_entropy_rows = -(pred_probs * torch.log(pred_probs.clamp_min(1.0e-8))).sum(dim=1)
+        target_entropy = (target_entropy_rows * pw).sum() / policy_count
+        pred_entropy = (pred_entropy_rows * pw).sum() / policy_count
+        policy_ce_rows = -(batch_policies * log_probs).sum(dim=1)
+        policy_loss = (policy_ce_rows * pw).sum() / policy_count
+        policy_kl_rows = (
+            batch_policies * (torch.log(batch_policies.clamp_min(1.0e-8)) - log_probs)
+        ).sum(dim=1)
+        policy_kl = (policy_kl_rows * pw).sum() / policy_count
         value_loss = F.mse_loss(predicted_values, batch_values)
         loss = cfg.policy_loss_weight * policy_loss + cfg.value_loss_weight * value_loss
 
@@ -909,7 +1029,8 @@ def train_epoch(
             soft_target = batch_policies.pow(1.0 / T)
             soft_target = soft_target / soft_target.sum(dim=1, keepdim=True).clamp_min(1e-8)
             soft_log_probs = F.log_softmax(soft_logits_f, dim=1)
-            soft_policy_loss = -(soft_target * soft_log_probs).sum(dim=1).mean()
+            soft_ce_rows = -(soft_target * soft_log_probs).sum(dim=1)
+            soft_policy_loss = (soft_ce_rows * pw).sum() / policy_count
             loss = loss + cfg.soft_policy_loss_weight * soft_policy_loss
 
         if (not torch.isfinite(loss)) or loss.item() > cfg.max_loss:
@@ -971,29 +1092,32 @@ def train_epoch(
             value_acc_mean = torch.tensor(1.0, device=batch_values.device)
 
         batch_size = batch_states.shape[0]
+        pc = float(pw.sum().item())
         totals.loss += float(loss.item()) * batch_size
-        totals.policy_loss += float(policy_loss.item()) * batch_size
-        totals.soft_policy_loss += float(soft_policy_loss.item()) * batch_size
+        totals.policy_loss += float(policy_loss.item()) * pc
+        totals.soft_policy_loss += float(soft_policy_loss.item()) * pc
         totals.value_loss += float(value_loss.item()) * batch_size
-        totals.policy_kl += float(policy_kl.item()) * batch_size
-        totals.target_entropy += float(target_entropy.mean().item()) * batch_size
-        totals.pred_entropy += float(pred_entropy.mean().item()) * batch_size
-        totals.policy_top1 += float((target_best == pred_best).float().mean().item()) * batch_size
+        totals.policy_kl += float(policy_kl.item()) * pc
+        totals.target_entropy += float(target_entropy.item()) * pc
+        totals.pred_entropy += float(pred_entropy.item()) * pc
+        totals.policy_top1 += float(((target_best == pred_best).float() * pw).sum().item())
         totals.value_mae += float((predicted_values.detach() - batch_values).abs().mean().item()) * batch_size
         totals.value_acc += float(value_acc_mean.item()) * batch_size
         totals.grad_norm += grad_norm_value * batch_size
         totals.batches += batch_size
+        policy_samples += pc
         totals.optimizer_steps += 1
 
     denom = max(1, totals.batches)
+    policy_denom = max(1.0, policy_samples)
     totals.loss /= denom
-    totals.policy_loss /= denom
-    totals.soft_policy_loss /= denom
+    totals.policy_loss /= policy_denom
+    totals.soft_policy_loss /= policy_denom
     totals.value_loss /= denom
-    totals.policy_kl /= denom
-    totals.target_entropy /= denom
-    totals.pred_entropy /= denom
-    totals.policy_top1 /= denom
+    totals.policy_kl /= policy_denom
+    totals.target_entropy /= policy_denom
+    totals.pred_entropy /= policy_denom
+    totals.policy_top1 /= policy_denom
     totals.value_mae /= denom
     totals.value_acc /= denom
     totals.grad_norm /= denom
@@ -1019,6 +1143,7 @@ def select_mcts_action(
             root_policy_temp=cfg.mcts_root_policy_temp,
             shaped_dirichlet=cfg.mcts_shaped_dirichlet,
             dynamic_cpuct=cfg.mcts_dynamic_cpuct,
+            fpu_reduction=cfg.mcts_fpu_reduction,
         ),
         device=device,
     ).search(state, add_exploration_noise=False)
@@ -1140,7 +1265,9 @@ def run_training(cfg: TrainConfig) -> None:
     )
     start_iteration = load_resume_checkpoint(base_model, optimizer, cfg)
     end_iteration = start_iteration + cfg.iterations
-    replay = load_replay(cfg)
+    replay, kl_buffer = load_replay(cfg)
+    if cfg.playout_cap_randomization and cfg.fast_simulations <= 0:
+        cfg.fast_simulations = max(1, cfg.simulations // 4)
     mcts_cfg = MCTSConfig(
         simulations=cfg.simulations,
         c_puct=cfg.mcts_c_puct,
@@ -1151,6 +1278,9 @@ def run_training(cfg: TrainConfig) -> None:
         root_policy_temp=cfg.mcts_root_policy_temp,
         shaped_dirichlet=cfg.mcts_shaped_dirichlet,
         dynamic_cpuct=cfg.mcts_dynamic_cpuct,
+        fpu_reduction=cfg.mcts_fpu_reduction,
+        forced_playouts=cfg.mcts_forced_playouts,
+        forced_playout_k=cfg.mcts_forced_playout_k,
     )
     scaler = make_grad_scaler(cfg.amp and cfg.device.startswith("cuda"), cfg.amp_dtype)
     champion = copy.deepcopy(base_model).to(cfg.device) if cfg.eval_interval and cfg.eval_games else None
@@ -1163,33 +1293,33 @@ def run_training(cfg: TrainConfig) -> None:
         print(f"iter={iteration}/{end_iteration} phase=selfplay_start", flush=True)
         examples, kl_surprises, lengths, selfplay_stats = collect_self_play_examples(base_model, cfg, mcts_cfg, iteration)
         raw_examples = len(examples)
-        if cfg.augment_symmetries:
-            # augment examples but replicate KL surprises to match (8x)
-            kl_surprises = kl_surprises * 8
-            examples = augment_examples(examples, cfg.board_size)
+        policy_examples = int(sum(example[3] for example in examples))
         replay.extend(examples)
-        if cfg.surprise_weighting:
-            if not hasattr(run_training, "_kl_buffer"):
-                run_training._kl_buffer = deque(maxlen=cfg.replay_size)
-            kl_buffer = run_training._kl_buffer
-            kl_buffer.extend(kl_surprises)
-        else:
-            kl_buffer = None
+        kl_buffer.extend(kl_surprises)
         new_examples = len(examples)
         print(
             f"iter={iteration}/{end_iteration} phase=selfplay_done "
-            f"raw_examples={raw_examples} examples={new_examples} "
+            f"raw_examples={raw_examples} policy_examples={policy_examples} "
             f"avg_moves={np.mean(lengths):.1f} replay={len(replay)} "
             f"target_policy_entropy={selfplay_stats['policy_entropy']:.4f} "
             f"black_win_rate={selfplay_stats['black_win_rate']:.3f} "
             f"white_win_rate={selfplay_stats['white_win_rate']:.3f} "
             f"draw_rate={selfplay_stats['draw_rate']:.3f} "
+            f"full_search_rate={selfplay_stats['full_search_rate']:.3f} "
             f"elapsed={format_duration(time.monotonic() - iteration_start)}",
             flush=True,
         )
 
         stats = TrainStats()
-        train_dataset, train_weights = replay_to_dataset(replay, kl_buffer)
+        train_dataset, train_weights = replay_to_dataset(
+            replay, kl_buffer if cfg.surprise_weighting else None
+        )
+        if cfg.surprise_weighting and train_weights is None:
+            print(
+                "train_warning surprise_weighting_disabled reason=kl_buffer_mismatch "
+                f"kl={len(kl_buffer)} replay={len(replay)}",
+                flush=True,
+            )
         for epoch in range(1, cfg.epochs + 1):
             epoch_start = time.monotonic()
             stats = train_epoch(model, optimizer, replay, cfg, scaler, train_dataset, train_weights)
@@ -1232,7 +1362,7 @@ def run_training(cfg: TrainConfig) -> None:
             best_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(checkpoint, best_path)
         if cfg.replay_path and cfg.replay_save_interval > 0 and iteration % cfg.replay_save_interval == 0:
-            save_replay(replay, cfg.replay_path)
+            save_replay(replay, kl_buffer, cfg.replay_path)
 
         total_elapsed = time.monotonic() - run_start
         avg_iteration = total_elapsed / completed_this_run
@@ -1245,6 +1375,8 @@ def run_training(cfg: TrainConfig) -> None:
                 "end_iteration": end_iteration,
                 "raw_examples": raw_examples,
                 "examples": new_examples,
+                "policy_examples": policy_examples,
+                "full_search_rate": selfplay_stats["full_search_rate"],
                 "avg_moves": float(np.mean(lengths)),
                 "replay": len(replay),
                 "loss": stats.loss,
@@ -1292,7 +1424,7 @@ def run_training(cfg: TrainConfig) -> None:
             flush=True,
         )
 
-    save_replay(replay, cfg.replay_path)
+    save_replay(replay, kl_buffer, cfg.replay_path)
 
 
 def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
@@ -1304,6 +1436,8 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
         choices=["local", "a100-4", "a100-fast", "a100-turbo", "a100-prod"],
         default=defaults.preset,
     )
+    parser.add_argument("--board-size", type=int, default=defaults.board_size)
+    parser.add_argument("--win-length", type=int, default=defaults.win_length)
     parser.add_argument("--iterations", type=int, default=defaults.iterations)
     parser.add_argument("--games-per-iteration", type=int, default=defaults.games_per_iteration)
     parser.add_argument("--simulations", type=int, default=defaults.simulations)
@@ -1333,6 +1467,20 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--no-mcts-shaped-dirichlet", dest="mcts_shaped_dirichlet", action="store_false")
     parser.add_argument("--mcts-dynamic-cpuct", dest="mcts_dynamic_cpuct", action="store_true")
     parser.add_argument("--no-mcts-dynamic-cpuct", dest="mcts_dynamic_cpuct", action="store_false")
+    parser.add_argument("--mcts-fpu-reduction", type=float, default=defaults.mcts_fpu_reduction)
+    parser.add_argument("--mcts-forced-playouts", dest="mcts_forced_playouts", action="store_true")
+    parser.add_argument("--no-mcts-forced-playouts", dest="mcts_forced_playouts", action="store_false")
+    parser.add_argument("--mcts-forced-playout-k", type=float, default=defaults.mcts_forced_playout_k)
+    parser.add_argument(
+        "--playout-cap-randomization", dest="playout_cap_randomization", action="store_true"
+    )
+    parser.add_argument(
+        "--no-playout-cap-randomization", dest="playout_cap_randomization", action="store_false"
+    )
+    parser.add_argument("--full-search-prob", type=float, default=defaults.full_search_prob)
+    parser.add_argument("--fast-simulations", type=int, default=defaults.fast_simulations)
+    parser.add_argument("--selfplay-tree-reuse", dest="selfplay_tree_reuse", action="store_true")
+    parser.add_argument("--no-selfplay-tree-reuse", dest="selfplay_tree_reuse", action="store_false")
     parser.add_argument("--policy-loss-weight", type=float, default=defaults.policy_loss_weight)
     parser.add_argument("--value-loss-weight", type=float, default=defaults.value_loss_weight)
     parser.add_argument("--learning-rate", type=float, default=defaults.learning_rate)
@@ -1384,6 +1532,9 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
         surprise_weighting=defaults.surprise_weighting,
         mcts_shaped_dirichlet=defaults.mcts_shaped_dirichlet,
         mcts_dynamic_cpuct=defaults.mcts_dynamic_cpuct,
+        mcts_forced_playouts=defaults.mcts_forced_playouts,
+        playout_cap_randomization=defaults.playout_cap_randomization,
+        selfplay_tree_reuse=defaults.selfplay_tree_reuse,
         gate_evaluation=defaults.gate_evaluation,
         compile_model=defaults.compile_model,
         amp=defaults.amp,
