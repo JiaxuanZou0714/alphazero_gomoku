@@ -1,6 +1,6 @@
 # 10x10 AlphaZero 五子棋
 
-这是一个面向 `10x10` 棋盘的 AlphaZero 风格五子棋训练项目。当前仓库包含训练代码、网页对弈界面、一次 4 卡 A100 训练日志、训练曲线图，以及最新保留的 checkpoint：
+这是一个面向 `10x10` 棋盘的 AlphaZero 风格五子棋训练项目，并移植了多项 [KataGo](https://github.com/lightvector/KataGo) 的训练改进。当前仓库包含训练代码、网页对弈界面、一次 4 卡 A100 训练日志、训练曲线图，以及最新保留的 checkpoint：
 
 ```text
 outputs/checkpoints/a100-4-prod-v3/gomoku10_iter_0030.pt
@@ -13,21 +13,48 @@ outputs/checkpoints/a100-4-prod-v3/gomoku10_iter_0030.pt
 - 任意方向连成五子即获胜；
 - 棋盘下满且无人连五则为平局。
 
-策略和价值都由神经网络从自我对弈中学习。MCTS 使用网络给出的 policy/value 作为先验与叶子估值，训练目标来自 MCTS 访问分布和最终胜负。
+策略和价值都由神经网络从自我对弈中学习。
 
 ## 项目结构
 
 ```text
 game.py        五子棋规则、状态转移和胜负判断
-mcts.py        MCTS 搜索
-model.py       Policy-Value 网络
+mcts.py        MCTS 搜索（含 KataGo 改进）
+model.py       Policy-Value 网络（含全局池化、辅助软策略头）
 train.py       自我对弈、训练、评估和 checkpoint 保存
+utils.py       公共工具（resolve_device, load_model）
 play.py        命令行人机对弈
 web_play.py    本地网页对弈服务
 web/           前端棋盘界面
 logs/          训练日志
 outputs/       checkpoint、metrics、plots
 ```
+
+## KataGo 改进
+
+以下改进均可通过 `TrainConfig` 参数独立开关，默认全部关闭以保持向后兼容。`a100-4` 预设会全部开启。
+
+### 神经网络
+
+| 改进 | 参数 | 说明 |
+|------|------|------|
+| 全局池化 | `use_global_pool` | 残差块末尾 avg+max 池化 → sigmoid gate，向每个格子广播全局棋盘信息 |
+| 辅助软策略头 | `use_soft_policy` + `soft_policy_loss_weight` | 第二个 policy head，训练目标 π^(1/T)，权重约 8×，加速学习非最优落点 |
+
+### MCTS
+
+| 改进 | 参数 | 说明 |
+|------|------|------|
+| 根节点策略温度 | `mcts_root_policy_temp` | 展开根节点前对先验 logits 除以温度，避免先验过早锐化 |
+| 形状化 Dirichlet 噪声 | `mcts_shaped_dirichlet` | 先验高于中位数的落点用更高 alpha，更有针对性地探索潜力走法 |
+| 动态方差缩放 cPUCT | `mcts_dynamic_cpuct` | `c_puct` 乘以 `sqrt(实证价值方差)`，自适应探索-利用平衡 |
+
+### 训练数据
+
+| 改进 | 参数 | 说明 |
+|------|------|------|
+| 惊喜加权采样 | `surprise_weighting` | 按 KL(先验‖MCTS目标) 加权 replay 采样，重点训练网络盲区 |
+| 短期价值目标 | `mcts_value_weight` | `target = (1-w) * 终局胜负 + w * MCTS估值`，降低纯终局标签的高方差 |
 
 ## 当前模型
 
@@ -59,7 +86,7 @@ python -m alphazero_gomoku.train \
 
 ## 使用 A100 预设训练
 
-在远端 A100 机器上，从 `~/jiaxuanzou` 运行：
+在远端 A100 机器上，从 `~/jiaxuanzou` 运行（自动开启全部 KataGo 改进）：
 
 ```bash
 cd ~/jiaxuanzou
@@ -72,7 +99,18 @@ python -m alphazero_gomoku.train \
   --metrics-path alphazero_gomoku/outputs/metrics/a100-4-prod-v3.jsonl
 ```
 
-`a100-4` 预设使用更大的 SE-ResNet、固定每轮训练步数、cosine learning-rate schedule、16 个并行自我对弈 worker，以及多 GPU 训练更新。
+`a100-4` 预设使用更大的 SE-ResNet + 全局池化 + 软策略头、固定每轮训练步数、cosine learning-rate schedule、16 个并行自我对弈 worker，以及全套 KataGo MCTS 和训练改进。
+
+从已有 checkpoint 继续训练：
+
+```bash
+python -m alphazero_gomoku.train \
+  --preset a100-4 \
+  --resume alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_iter_0030.pt \
+  --checkpoint-dir alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3 \
+  --replay-path alphazero_gomoku/outputs/replay/a100-4-prod-v3_replay.pt \
+  --metrics-path alphazero_gomoku/outputs/metrics/a100-4-prod-v3.jsonl
+```
 
 ## 命令行对弈
 
@@ -102,6 +140,8 @@ python -m alphazero_gomoku.web_play \
 ```text
 http://127.0.0.1:8765
 ```
+
+界面支持悔棋（Undo）和局面分析（Analyze）。
 
 ## 训练曲线
 
@@ -138,8 +178,6 @@ logs/a100_4_prod_v3_stable_20260610_194644.log
 ![entropy](outputs/plots/a100_4_prod_v3_stable_20260610_194644/entropy.png)
 
 `pred_entropy` 从 `4.5976` 快速降到约 `1.8`，说明网络输出从接近全棋盘均匀分布变得更集中。与此同时，后期 `target_entropy` 和 `selfplay_entropy` 有所回升，表示 MCTS 目标并不是完全塌缩到单一落点，仍然保留一定搜索分歧。
-
-这组曲线整体是健康的：网络策略更确定，但 MCTS 目标没有完全退化成硬标签。
 
 ### 自我对弈结果
 

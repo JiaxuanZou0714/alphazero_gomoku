@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import torch
+
 from .game import GomokuState
 from .model import PolicyValueNet
 from .torch_compat import tensor_from_array
@@ -20,6 +21,10 @@ class MCTSConfig:
     dirichlet_fraction: float = 0.25
     eval_batch_size: int = 1
     amp_dtype: str = "bf16"
+    # KataGo improvements (all default to off for backward compat)
+    root_policy_temp: float = 1.0    # >1 flattens root priors, improves early exploration
+    shaped_dirichlet: bool = False   # per-action alpha based on prior rank
+    dynamic_cpuct: bool = False      # scale c_puct by sqrt(empirical value variance)
 
 
 @dataclass
@@ -27,6 +32,7 @@ class Node:
     prior: float
     visit_count: int = 0
     value_sum: float = 0.0
+    value_sq_sum: float = 0.0       # for dynamic cPUCT variance estimation
     children: dict[int, "Node"] = field(default_factory=dict)
 
     @property
@@ -38,6 +44,14 @@ class Node:
         if self.visit_count == 0:
             return 0.0
         return self.value_sum / self.visit_count
+
+    @property
+    def value_var(self) -> float:
+        """Empirical variance of backed-up values."""
+        if self.visit_count < 2:
+            return 1.0
+        mean = self.value_sum / self.visit_count
+        return max(0.0, self.value_sq_sum / self.visit_count - mean * mean)
 
 
 class MCTS:
@@ -58,7 +72,7 @@ class MCTS:
             raise ValueError("cannot search from a terminal state")
 
         root = Node(prior=1.0)
-        self._expand(root, state)
+        self._expand(root, state, is_root=True)
         if add_exploration_noise:
             self._add_dirichlet_noise(root)
 
@@ -105,8 +119,8 @@ class MCTS:
 
         return root
 
-    def _expand(self, node: Node, state: GomokuState) -> float:
-        policy, value = self._evaluate(state)
+    def _expand(self, node: Node, state: GomokuState, is_root: bool = False) -> float:
+        policy, value = self._evaluate(state, apply_root_temp=is_root)
         self._expand_with_policy(node, state, policy)
         return value
 
@@ -115,10 +129,12 @@ class MCTS:
         for action in legal_actions:
             node.children[int(action)] = Node(prior=float(policy[action]))
 
-    def _evaluate(self, state: GomokuState) -> tuple[np.ndarray, float]:
-        return self._evaluate_batch([state])[0]
+    def _evaluate(self, state: GomokuState, apply_root_temp: bool = False) -> tuple[np.ndarray, float]:
+        return self._evaluate_batch([state], apply_root_temp=apply_root_temp)[0]
 
-    def _evaluate_batch(self, states: list[GomokuState]) -> list[tuple[np.ndarray, float]]:
+    def _evaluate_batch(
+        self, states: list[GomokuState], apply_root_temp: bool = False
+    ) -> list[tuple[np.ndarray, float]]:
         if not states:
             return []
 
@@ -128,22 +144,26 @@ class MCTS:
             dtype=torch.float32,
             device=self.device,
         )
-        # stack legal masks into one array for vectorised masking
         legal_masks_np = np.stack([state.legal_mask() for state in states])  # (N, A)
 
         autocast_ctx = self._autocast_context()
         with torch.inference_mode(), autocast_ctx:
-            logits_batch, values_batch = self.model(encoded)
+            policy_logits, _, values_batch = self.model(encoded)
             logits_np = torch.nan_to_num(
-                logits_batch.float(), nan=0.0, posinf=0.0, neginf=0.0
+                policy_logits.float(), nan=0.0, posinf=0.0, neginf=0.0
             ).cpu().numpy()  # (N, A)
             values = torch.nan_to_num(
                 values_batch.float(), nan=0.0, posinf=1.0, neginf=-1.0
             ).clamp(-1.0, 1.0).cpu().tolist()
 
-        # mask illegal actions and compute softmax entirely in numpy
+        # Apply root policy temperature to flatten overconfident priors
+        temp = self.config.root_policy_temp
+        if apply_root_temp and temp != 1.0 and temp > 0:
+            logits_np /= temp
+
+        # Masked softmax in numpy (vectorised)
         logits_np[~legal_masks_np] = -1.0e9
-        logits_np -= logits_np.max(axis=1, keepdims=True)  # numerical stability
+        logits_np -= logits_np.max(axis=1, keepdims=True)
         exp = np.exp(logits_np)
         exp[~legal_masks_np] = 0.0
         totals = exp.sum(axis=1, keepdims=True)
@@ -176,9 +196,14 @@ class MCTS:
         best: list[tuple[int, Node]] = []
         parent_visits = max(1, node.visit_count)
 
+        # Dynamic cPUCT: scale by sqrt of empirical value variance to adapt exploration
+        c = self.config.c_puct
+        if self.config.dynamic_cpuct:
+            c = c * math.sqrt(max(0.25, node.value_var))
+
         for action, child in node.children.items():
             prior_score = (
-                self.config.c_puct
+                c
                 * child.prior
                 * math.sqrt(parent_visits)
                 / (child.visit_count + 1)
@@ -196,9 +221,22 @@ class MCTS:
         if not root.children:
             return
         actions = list(root.children)
-        noise = np.random.default_rng().dirichlet(
-            [self.config.dirichlet_alpha] * len(actions)
-        )
+        rng = np.random.default_rng()
+
+        if self.config.shaped_dirichlet:
+            # KataGo shaped Dirichlet: actions above median prior get higher alpha
+            # (explore plausible moves more), below-median get lower alpha (less noise dilution)
+            priors = np.array([root.children[a].prior for a in actions])
+            median = float(np.median(priors))
+            alphas = np.where(
+                priors >= median,
+                self.config.dirichlet_alpha * 2.0,
+                self.config.dirichlet_alpha * 0.5,
+            )
+            noise = rng.dirichlet(alphas)
+        else:
+            noise = rng.dirichlet([self.config.dirichlet_alpha] * len(actions))
+
         frac = self.config.dirichlet_fraction
         for action, sample in zip(actions, noise):
             child = root.children[action]
@@ -208,6 +246,7 @@ class MCTS:
     def _backpropagate(search_path: list[Node], value: float) -> None:
         for node in reversed(search_path):
             node.value_sum += value
+            node.value_sq_sum += value * value
             node.visit_count += 1
             value = -value
 

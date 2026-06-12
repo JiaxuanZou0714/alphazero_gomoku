@@ -61,8 +61,18 @@ class TrainConfig:
     value_hidden: int = 128
     use_se: bool = False
     se_ratio: int = 16
+    use_global_pool: bool = False       # KataGo: global context pooling in each residual block
+    use_soft_policy: bool = False       # KataGo: auxiliary soft policy head (target = π^(1/T))
     policy_loss_weight: float = 1.0
     value_loss_weight: float = 1.0
+    soft_policy_loss_weight: float = 0.0   # KataGo: weight for soft policy loss (use ~8.0)
+    soft_policy_temp: float = 4.0          # temperature T for soft target: π^(1/T)
+    surprise_weighting: bool = False    # KataGo: weight replay samples by KL(prior||MCTS)
+    mcts_value_weight: float = 0.0      # KataGo: mix MCTS root value into value target (0=off,0.5=half)
+    # KataGo MCTS improvements
+    mcts_root_policy_temp: float = 1.0  # >1 flattens root priors for better early exploration
+    mcts_shaped_dirichlet: bool = False # shaped Dirichlet noise by prior rank
+    mcts_dynamic_cpuct: bool = False    # scale c_puct by empirical value variance
     augment_symmetries: bool = True
     replay_path: str = ""
     replay_save_interval: int = 5
@@ -88,6 +98,7 @@ class TrainConfig:
 class TrainStats:
     loss: float = 0.0
     policy_loss: float = 0.0
+    soft_policy_loss: float = 0.0
     value_loss: float = 0.0
     policy_kl: float = 0.0
     target_entropy: float = 0.0
@@ -228,6 +239,14 @@ def preset_config(name: str) -> TrainConfig:
         cfg.value_channels = 8
         cfg.value_hidden = 512
         cfg.use_se = True
+        cfg.use_global_pool = True          # KataGo: global context injection
+        cfg.use_soft_policy = True          # KataGo: auxiliary soft policy head
+        cfg.soft_policy_loss_weight = 8.0   # KataGo: 8x weight on soft policy loss
+        cfg.surprise_weighting = True       # KataGo: prioritise high-KL replay samples
+        cfg.mcts_value_weight = 0.5         # KataGo: mix MCTS value into value target
+        cfg.mcts_root_policy_temp = 1.1     # KataGo: flatten root priors slightly
+        cfg.mcts_shaped_dirichlet = True    # KataGo: shaped Dirichlet by prior rank
+        cfg.mcts_dynamic_cpuct = True       # KataGo: variance-scaled exploration
         cfg.checkpoint_dir = "alphazero_gomoku/outputs/checkpoints/a100-4"
         cfg.replay_path = "alphazero_gomoku/outputs/replay/a100-4_replay.pt"
         cfg.metrics_path = "alphazero_gomoku/outputs/metrics/a100-4.jsonl"
@@ -479,11 +498,20 @@ def play_self_game(
     model: PolicyValueNet,
     cfg: TrainConfig,
     mcts_cfg: MCTSConfig,
-) -> tuple[list[Example], dict[str, float]]:
+) -> tuple[list[Example], list[float], dict[str, float]]:
+    """Play one self-play game.
+
+    Returns:
+        examples: (encoded_state, mcts_policy, value) for each move
+        kl_surprises: KL(network_prior || MCTS_target) per move — used for
+            surprise-weighted replay sampling (KataGo)
+        stats: scalar diagnostics
+    """
     mcts = MCTS(model, mcts_cfg, device=cfg.device)
     state = GomokuState.new(size=cfg.board_size, win_length=cfg.win_length)
-    history: list[tuple[np.ndarray, np.ndarray, int]] = []
+    history: list[tuple[np.ndarray, np.ndarray, int, float]] = []  # +mcts_value
     entropies: list[float] = []
+    kl_surprises: list[float] = []
 
     while not state.is_terminal:
         temperature = 1.0 if state.moves_played < cfg.temperature_moves else 0.0
@@ -494,21 +522,35 @@ def play_self_game(
             policy[legal] = 1.0 / len(legal)
         policy = policy.astype(np.float32)
         entropies.append(policy_entropy(policy))
-        history.append((state.encode(), policy, state.current_player))
+
+        # KL(prior || MCTS target) — measures how surprising this position was
+        prior = np.array([root.children[a].prior for a in sorted(root.children)], dtype=np.float32)
+        mcts_p = np.array([policy[a] for a in sorted(root.children)], dtype=np.float32)
+        kl = float(np.sum(mcts_p * np.log((mcts_p + 1e-12) / (prior + 1e-12))))
+        kl_surprises.append(max(0.0, kl))
+
+        # MCTS root value estimate (from current player's perspective)
+        mcts_value = float(-root.value) if root.visit_count > 0 else 0.0
+
+        history.append((state.encode(), policy, state.current_player, mcts_value))
         state = state.apply(sample_action(policy))
 
     examples: list[Example] = []
-    for encoded, policy, player in history:
+    w = cfg.mcts_value_weight
+    for encoded, policy, player, mcts_val in history:
         if state.winner == 0:
-            value = 0.0
+            terminal_v = 0.0
         else:
-            value = 1.0 if state.winner == player else -1.0
-        examples.append((encoded.astype(np.float32), policy, value))
+            terminal_v = 1.0 if state.winner == player else -1.0
+        # KataGo short-term value: blend terminal result with MCTS value estimate
+        value = (1.0 - w) * terminal_v + w * mcts_val if w > 0 else terminal_v
+        examples.append((encoded.astype(np.float32), policy, float(value)))
+
     stats = {
         "policy_entropy": float(np.mean(entropies)) if entropies else 0.0,
         "winner": float(state.winner if state.winner is not None else 0),
     }
-    return examples, stats
+    return examples, kl_surprises, stats
 
 
 def play_self_games_worker(
@@ -532,14 +574,16 @@ def play_self_games_worker(
     mcts_cfg = MCTSConfig(**mcts_data)
 
     examples: list[Example] = []
+    kl_surprises: list[float] = []
     lengths: list[int] = []
     entropies: list[float] = []
     winners: list[float] = []
     worker_start = time.monotonic()
     for game_index in range(1, games + 1):
         game_start = time.monotonic()
-        game_examples, game_stats = play_self_game(model, cfg, mcts_cfg)
+        game_examples, game_kls, game_stats = play_self_game(model, cfg, mcts_cfg)
         examples.extend(game_examples)
+        kl_surprises.extend(game_kls)
         lengths.append(len(game_examples))
         entropies.append(game_stats["policy_entropy"])
         winners.append(game_stats["winner"])
@@ -565,7 +609,7 @@ def play_self_games_worker(
         "white_win_rate": float(np.mean([winner == -1 for winner in winners])) if winners else 0.0,
         "draw_rate": float(np.mean([winner == 0 for winner in winners])) if winners else 0.0,
     }
-    return examples, lengths, stats, device
+    return examples, kl_surprises, lengths, stats, device
 
 
 def distribute_games(total_games: int, worker_count: int) -> list[int]:
@@ -599,16 +643,18 @@ def collect_self_play_examples(
     cfg: TrainConfig,
     mcts_cfg: MCTSConfig,
     iteration: int,
-) -> tuple[list[Example], list[int], dict[str, float]]:
+) -> tuple[list[Example], list[float], list[int], dict[str, float]]:
     if cfg.self_play_workers <= 1:
         examples: list[Example] = []
+        kl_surprises: list[float] = []
         lengths: list[int] = []
         stats: list[dict[str, float]] = []
         start = time.monotonic()
         for game_index in range(1, cfg.games_per_iteration + 1):
             game_start = time.monotonic()
-            game_examples, game_stats = play_self_game(unwrap_model(model), cfg, mcts_cfg)
+            game_examples, game_kls, game_stats = play_self_game(unwrap_model(model), cfg, mcts_cfg)
             examples.extend(game_examples)
+            kl_surprises.extend(game_kls)
             lengths.append(len(game_examples))
             stats.append(game_stats)
             elapsed = time.monotonic() - start
@@ -623,7 +669,7 @@ def collect_self_play_examples(
                 f"examples={len(examples)}",
                 flush=True,
             )
-        return examples, lengths, merge_stats(stats)
+        return examples, kl_surprises, lengths, merge_stats(stats)
 
     devices = split_devices(cfg.self_play_devices, cfg.device)
     worker_devices = [
@@ -637,6 +683,7 @@ def collect_self_play_examples(
     ]
 
     all_examples: list[Example] = []
+    all_kl_surprises: list[float] = []
     all_lengths: list[int] = []
     all_stats: list[dict[str, float]] = []
     cfg_data = asdict(cfg)
@@ -712,8 +759,9 @@ def collect_self_play_examples(
                     return_when=concurrent.futures.FIRST_COMPLETED,
                 )
                 for future in done:
-                    examples, lengths, stats, device = future.result()
+                    examples, kl_surprises, lengths, stats, device = future.result()
                     all_examples.extend(examples)
+                    all_kl_surprises.extend(kl_surprises)
                     all_lengths.extend(lengths)
                     all_stats.append(stats)
                     print(
@@ -722,14 +770,29 @@ def collect_self_play_examples(
                         f"policy_entropy={stats['policy_entropy']:.3f}",
                         flush=True,
                     )
-    return all_examples, all_lengths, merge_stats(all_stats)
+    return all_examples, all_kl_surprises, all_lengths, merge_stats(all_stats)
 
 
-def replay_to_dataset(replay: deque[Example]) -> TensorDataset:
+def replay_to_dataset(
+    replay: deque[Example],
+    kl_buffer: deque[float] | None = None,
+) -> tuple[TensorDataset, torch.Tensor | None]:
+    """Convert replay buffer to TensorDataset.
+
+    Returns (dataset, weights) where weights is a 1-D tensor of per-sample
+    surprise weights for WeightedRandomSampler, or None if kl_buffer is absent.
+    """
     states = tensor_from_array(np.stack([item[0] for item in replay]), dtype=torch.float32)
     policies = tensor_from_array(np.stack([item[1] for item in replay]), dtype=torch.float32)
     values = torch.tensor([item[2] for item in replay], dtype=torch.float32)
-    return TensorDataset(states, policies, values)
+    dataset = TensorDataset(states, policies, values)
+    weights = None
+    if kl_buffer is not None and len(kl_buffer) == len(replay):
+        kl = np.array(list(kl_buffer), dtype=np.float32)
+        mean_kl = float(kl.mean()) + 1e-8
+        w = np.clip(0.5 + 0.5 * kl / mean_kl, 0.1, 10.0)
+        weights = torch.tensor(w, dtype=torch.float32)
+    return dataset, weights
 
 
 def train_epoch(
@@ -739,17 +802,37 @@ def train_epoch(
     cfg: TrainConfig,
     scaler: object | None,
     dataset: TensorDataset | None = None,
+    sample_weights: torch.Tensor | None = None,
 ) -> TrainStats:
     if dataset is None:
-        dataset = replay_to_dataset(replay)
-    loader = DataLoader(
-        dataset,
-        batch_size=cfg.batch_size,
-        shuffle=True,
-        pin_memory=cfg.device.startswith("cuda"),
-        num_workers=0,
-        drop_last=cfg.train_steps_per_iteration > 0,
-    )
+        dataset, sample_weights = replay_to_dataset(
+            replay, kl_buffer=None
+        )
+    use_weighted = cfg.surprise_weighting and sample_weights is not None
+    if use_weighted:
+        from torch.utils.data import WeightedRandomSampler
+        sampler = WeightedRandomSampler(
+            weights=sample_weights,
+            num_samples=len(dataset),
+            replacement=True,
+        )
+        loader = DataLoader(
+            dataset,
+            batch_size=cfg.batch_size,
+            sampler=sampler,
+            pin_memory=cfg.device.startswith("cuda"),
+            num_workers=0,
+            drop_last=cfg.train_steps_per_iteration > 0,
+        )
+    else:
+        loader = DataLoader(
+            dataset,
+            batch_size=cfg.batch_size,
+            shuffle=True,
+            pin_memory=cfg.device.startswith("cuda"),
+            num_workers=0,
+            drop_last=cfg.train_steps_per_iteration > 0,
+        )
 
     model.train()
     totals = TrainStats(lr=float(optimizer.param_groups[0]["lr"]))
@@ -782,7 +865,7 @@ def train_epoch(
             batch_policies = batch_policies / policy_sums.clamp_min(1.0e-8).unsqueeze(1)
 
         with autocast_ctx:
-            logits, predicted_values = model(batch_states)
+            logits, soft_logits, predicted_values = model(batch_states)
         logits = logits.float()
         predicted_values = predicted_values.float()
         if not torch.isfinite(logits).all():
@@ -815,6 +898,19 @@ def train_epoch(
         policy_kl = (batch_policies * (torch.log(batch_policies.clamp_min(1.0e-8)) - log_probs)).sum(dim=1).mean()
         value_loss = F.mse_loss(predicted_values, batch_values)
         loss = cfg.policy_loss_weight * policy_loss + cfg.value_loss_weight * value_loss
+
+        # KataGo auxiliary soft policy loss: target = π^(1/T), teaches the network
+        # to discriminate among non-top moves and speeds up learning
+        soft_policy_loss = torch.tensor(0.0, device=cfg.device)
+        if soft_logits is not None and cfg.soft_policy_loss_weight > 0:
+            soft_logits_f = soft_logits.float()
+            T = max(1e-3, cfg.soft_policy_temp)
+            # soft target: π^(1/T) renormalised
+            soft_target = batch_policies.pow(1.0 / T)
+            soft_target = soft_target / soft_target.sum(dim=1, keepdim=True).clamp_min(1e-8)
+            soft_log_probs = F.log_softmax(soft_logits_f, dim=1)
+            soft_policy_loss = -(soft_target * soft_log_probs).sum(dim=1).mean()
+            loss = loss + cfg.soft_policy_loss_weight * soft_policy_loss
 
         if (not torch.isfinite(loss)) or loss.item() > cfg.max_loss:
             totals.skipped += 1
@@ -877,6 +973,7 @@ def train_epoch(
         batch_size = batch_states.shape[0]
         totals.loss += float(loss.item()) * batch_size
         totals.policy_loss += float(policy_loss.item()) * batch_size
+        totals.soft_policy_loss += float(soft_policy_loss.item()) * batch_size
         totals.value_loss += float(value_loss.item()) * batch_size
         totals.policy_kl += float(policy_kl.item()) * batch_size
         totals.target_entropy += float(target_entropy.mean().item()) * batch_size
@@ -891,6 +988,7 @@ def train_epoch(
     denom = max(1, totals.batches)
     totals.loss /= denom
     totals.policy_loss /= denom
+    totals.soft_policy_loss /= denom
     totals.value_loss /= denom
     totals.policy_kl /= denom
     totals.target_entropy /= denom
@@ -918,6 +1016,9 @@ def select_mcts_action(
             dirichlet_fraction=cfg.mcts_dirichlet_fraction,
             eval_batch_size=min(cfg.mcts_batch_size, max(1, simulations)),
             amp_dtype=cfg.mcts_amp_dtype,
+            root_policy_temp=cfg.mcts_root_policy_temp,
+            shaped_dirichlet=cfg.mcts_shaped_dirichlet,
+            dynamic_cpuct=cfg.mcts_dynamic_cpuct,
         ),
         device=device,
     ).search(state, add_exploration_noise=False)
@@ -1047,6 +1148,9 @@ def run_training(cfg: TrainConfig) -> None:
         dirichlet_fraction=cfg.mcts_dirichlet_fraction,
         eval_batch_size=cfg.mcts_batch_size,
         amp_dtype=cfg.mcts_amp_dtype,
+        root_policy_temp=cfg.mcts_root_policy_temp,
+        shaped_dirichlet=cfg.mcts_shaped_dirichlet,
+        dynamic_cpuct=cfg.mcts_dynamic_cpuct,
     )
     scaler = make_grad_scaler(cfg.amp and cfg.device.startswith("cuda"), cfg.amp_dtype)
     champion = copy.deepcopy(base_model).to(cfg.device) if cfg.eval_interval and cfg.eval_games else None
@@ -1057,11 +1161,20 @@ def run_training(cfg: TrainConfig) -> None:
         iteration_start = time.monotonic()
         set_optimizer_lr(optimizer, scheduled_learning_rate(cfg, iteration, end_iteration))
         print(f"iter={iteration}/{end_iteration} phase=selfplay_start", flush=True)
-        examples, lengths, selfplay_stats = collect_self_play_examples(base_model, cfg, mcts_cfg, iteration)
+        examples, kl_surprises, lengths, selfplay_stats = collect_self_play_examples(base_model, cfg, mcts_cfg, iteration)
         raw_examples = len(examples)
         if cfg.augment_symmetries:
+            # augment examples but replicate KL surprises to match (8x)
+            kl_surprises = kl_surprises * 8
             examples = augment_examples(examples, cfg.board_size)
         replay.extend(examples)
+        if cfg.surprise_weighting:
+            if not hasattr(run_training, "_kl_buffer"):
+                run_training._kl_buffer = deque(maxlen=cfg.replay_size)
+            kl_buffer = run_training._kl_buffer
+            kl_buffer.extend(kl_surprises)
+        else:
+            kl_buffer = None
         new_examples = len(examples)
         print(
             f"iter={iteration}/{end_iteration} phase=selfplay_done "
@@ -1076,14 +1189,15 @@ def run_training(cfg: TrainConfig) -> None:
         )
 
         stats = TrainStats()
-        train_dataset = replay_to_dataset(replay)
+        train_dataset, train_weights = replay_to_dataset(replay, kl_buffer)
         for epoch in range(1, cfg.epochs + 1):
             epoch_start = time.monotonic()
-            stats = train_epoch(model, optimizer, replay, cfg, scaler, train_dataset)
+            stats = train_epoch(model, optimizer, replay, cfg, scaler, train_dataset, train_weights)
             print(
                 f"train_progress iter={iteration}/{end_iteration} "
                 f"epoch={epoch}/{cfg.epochs} elapsed={format_duration(time.monotonic() - epoch_start)} "
                 f"loss={stats.loss:.4f} policy={stats.policy_loss:.4f} "
+                f"soft_policy={stats.soft_policy_loss:.4f} "
                 f"value={stats.value_loss:.4f} policy_kl={stats.policy_kl:.4f} "
                 f"target_entropy={stats.target_entropy:.4f} pred_entropy={stats.pred_entropy:.4f} "
                 f"policy_top1={stats.policy_top1:.4f} value_mae={stats.value_mae:.4f} "
@@ -1135,6 +1249,7 @@ def run_training(cfg: TrainConfig) -> None:
                 "replay": len(replay),
                 "loss": stats.loss,
                 "policy_loss": stats.policy_loss,
+                "soft_policy_loss": stats.soft_policy_loss,
                 "value_loss": stats.value_loss,
                 "policy_kl": stats.policy_kl,
                 "target_entropy": stats.target_entropy,
@@ -1204,6 +1319,20 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--value-hidden", type=int, default=defaults.value_hidden)
     parser.add_argument("--use-se", dest="use_se", action="store_true")
     parser.add_argument("--no-use-se", dest="use_se", action="store_false")
+    parser.add_argument("--use-global-pool", dest="use_global_pool", action="store_true")
+    parser.add_argument("--no-use-global-pool", dest="use_global_pool", action="store_false")
+    parser.add_argument("--use-soft-policy", dest="use_soft_policy", action="store_true")
+    parser.add_argument("--no-use-soft-policy", dest="use_soft_policy", action="store_false")
+    parser.add_argument("--soft-policy-loss-weight", type=float, default=defaults.soft_policy_loss_weight)
+    parser.add_argument("--soft-policy-temp", type=float, default=defaults.soft_policy_temp)
+    parser.add_argument("--surprise-weighting", dest="surprise_weighting", action="store_true")
+    parser.add_argument("--no-surprise-weighting", dest="surprise_weighting", action="store_false")
+    parser.add_argument("--mcts-value-weight", type=float, default=defaults.mcts_value_weight)
+    parser.add_argument("--mcts-root-policy-temp", type=float, default=defaults.mcts_root_policy_temp)
+    parser.add_argument("--mcts-shaped-dirichlet", dest="mcts_shaped_dirichlet", action="store_true")
+    parser.add_argument("--no-mcts-shaped-dirichlet", dest="mcts_shaped_dirichlet", action="store_false")
+    parser.add_argument("--mcts-dynamic-cpuct", dest="mcts_dynamic_cpuct", action="store_true")
+    parser.add_argument("--no-mcts-dynamic-cpuct", dest="mcts_dynamic_cpuct", action="store_false")
     parser.add_argument("--policy-loss-weight", type=float, default=defaults.policy_loss_weight)
     parser.add_argument("--value-loss-weight", type=float, default=defaults.value_loss_weight)
     parser.add_argument("--learning-rate", type=float, default=defaults.learning_rate)
@@ -1250,6 +1379,11 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
         data_parallel=defaults.data_parallel,
         augment_symmetries=defaults.augment_symmetries,
         use_se=defaults.use_se,
+        use_global_pool=defaults.use_global_pool,
+        use_soft_policy=defaults.use_soft_policy,
+        surprise_weighting=defaults.surprise_weighting,
+        mcts_shaped_dirichlet=defaults.mcts_shaped_dirichlet,
+        mcts_dynamic_cpuct=defaults.mcts_dynamic_cpuct,
         gate_evaluation=defaults.gate_evaluation,
         compile_model=defaults.compile_model,
         amp=defaults.amp,
