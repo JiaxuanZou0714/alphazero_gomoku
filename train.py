@@ -89,6 +89,7 @@ class TrainConfig:
     eval_interval: int = 0
     eval_games: int = 0
     eval_simulations: int = 128
+    eval_opening_moves: int = 2         # random opening plies per eval game pair (colors swapped)
     promotion_threshold: float = 0.55
     gate_evaluation: bool = False
     metrics_path: str = ""
@@ -1154,19 +1155,43 @@ def select_mcts_action(
     return int(policy.argmax())
 
 
+def random_opening(cfg: TrainConfig, rng: random.Random) -> list[int]:
+    """Uniform random legal opening moves for evaluation games."""
+    state = GomokuState.new(size=cfg.board_size, win_length=cfg.win_length)
+    opening: list[int] = []
+    for _ in range(max(0, cfg.eval_opening_moves)):
+        if state.is_terminal:
+            break
+        action = int(rng.choice(list(state.legal_actions())))
+        opening.append(action)
+        state = state.apply(action)
+    return opening
+
+
 def evaluate_candidate(
     candidate: PolicyValueNet,
     baseline: PolicyValueNet | None,
     cfg: TrainConfig,
+    rng: random.Random | None = None,
 ) -> dict[str, float]:
+    """Pit candidate against baseline on randomised paired openings.
+
+    Without openings the matchup is deterministic (greedy MCTS, no noise), so
+    eval_games would collapse into 2 distinct games. Each random opening is
+    played twice with colors swapped, cancelling first-move advantage.
+    """
     if baseline is None or cfg.eval_games <= 0:
         return {"win_rate": 1.0, "wins": 0.0, "losses": 0.0, "draws": 0.0}
 
+    rng = rng or random.Random(random.getrandbits(64))
+    openings = [random_opening(cfg, rng) for _ in range((cfg.eval_games + 1) // 2)]
     candidate.eval()
     baseline.eval()
     wins = losses = draws = 0
     for game_index in range(cfg.eval_games):
         state = GomokuState.new(size=cfg.board_size, win_length=cfg.win_length)
+        for action in openings[game_index // 2]:
+            state = state.apply(action)
         candidate_player = 1 if game_index % 2 == 0 else -1
         while not state.is_terminal:
             if state.current_player == candidate_player:
@@ -1340,7 +1365,9 @@ def run_training(cfg: TrainConfig) -> None:
         eval_stats = {"win_rate": 1.0, "wins": 0.0, "losses": 0.0, "draws": 0.0}
         promoted = True
         if champion is not None and cfg.eval_interval > 0 and iteration % cfg.eval_interval == 0:
-            eval_stats = evaluate_candidate(base_model, champion, cfg)
+            eval_stats = evaluate_candidate(
+                base_model, champion, cfg, rng=random.Random(cfg.seed + iteration * 7919)
+            )
             promoted = eval_stats["win_rate"] >= cfg.promotion_threshold
             print(
                 f"eval_progress iter={iteration}/{end_iteration} "
@@ -1506,6 +1533,7 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--eval-interval", type=int, default=defaults.eval_interval)
     parser.add_argument("--eval-games", type=int, default=defaults.eval_games)
     parser.add_argument("--eval-simulations", type=int, default=defaults.eval_simulations)
+    parser.add_argument("--eval-opening-moves", type=int, default=defaults.eval_opening_moves)
     parser.add_argument("--promotion-threshold", type=float, default=defaults.promotion_threshold)
     parser.add_argument("--gate-evaluation", dest="gate_evaluation", action="store_true")
     parser.add_argument("--no-gate-evaluation", dest="gate_evaluation", action="store_false")

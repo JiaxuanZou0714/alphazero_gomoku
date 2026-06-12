@@ -14,8 +14,10 @@ from alphazero_gomoku.model import PolicyValueNet
 from alphazero_gomoku.train import (
     TrainConfig,
     apply_random_symmetries,
+    evaluate_candidate,
     load_replay,
     play_self_game,
+    random_opening,
     replay_to_dataset,
     save_replay,
     train_epoch,
@@ -111,6 +113,27 @@ class TrainEpochTest(unittest.TestCase):
         stats = train_epoch(model, optimizer, replay, cfg, scaler=None)
         self.assertEqual(stats.optimizer_steps, 2)
         self.assertTrue(np.isfinite(stats.loss))
+
+
+class EvaluationTest(unittest.TestCase):
+    def test_random_opening_is_legal_and_seeded(self) -> None:
+        cfg = TrainConfig(eval_opening_moves=4)
+        opening_a = random_opening(cfg, random.Random(42))
+        opening_b = random_opening(cfg, random.Random(42))
+        self.assertEqual(opening_a, opening_b)
+        self.assertEqual(len(opening_a), 4)
+        self.assertEqual(len(set(opening_a)), 4)  # no repeated squares
+
+    def test_paired_openings_smoke(self) -> None:
+        torch.manual_seed(0)
+        cfg = TrainConfig(eval_games=2, eval_simulations=4, eval_opening_moves=2)
+        cfg.device = "cpu"
+        result = evaluate_candidate(tiny_model(), tiny_model(), cfg, rng=random.Random(7))
+        self.assertEqual(
+            result["wins"] + result["losses"] + result["draws"], float(cfg.eval_games)
+        )
+        self.assertGreaterEqual(result["win_rate"], 0.0)
+        self.assertLessEqual(result["win_rate"], 1.0)
 
 
 class ReplayRoundTripTest(unittest.TestCase):
