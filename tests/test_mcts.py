@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from alphazero_gomoku.game import GomokuState
-from alphazero_gomoku.mcts import MCTS, MCTSConfig
+from alphazero_gomoku.mcts import MCTS, MCTSConfig, Node
 
 
 class UniformNet(torch.nn.Module):
@@ -95,6 +95,30 @@ class MCTSTest(unittest.TestCase):
         mcts = MCTS(UniformNet(action_size=4), MCTSConfig(simulations=4), device="cpu")
         with self.assertRaises(ValueError):
             mcts.search(state)
+
+    def test_fpu_disabled_at_root(self) -> None:
+        # Regression: when the losing side's prior misses the only blocking
+        # move, root FPU keeps that unvisited child pessimistic forever and the
+        # search never tries it. FPU must apply only below the root.
+        cfg = MCTSConfig(fpu_reduction=0.5, c_puct=0.1)
+        mcts = MCTS(UniformNet(), cfg, device="cpu")
+
+        def make_parent() -> Node:
+            parent = Node(prior=1.0)
+            parent.visit_count = 20
+            parent.value_sum = -16.0  # parent value -0.8: the losing side
+            visited = Node(prior=0.9)
+            visited.visit_count = 19
+            visited.value_sum = 19 * 0.5  # -Q = -0.5 from parent's perspective
+            parent.children = {0: visited, 1: Node(prior=0.05)}
+            return parent
+
+        # below the root, FPU freezes the unvisited low-prior child out
+        action, _ = mcts._select_child(make_parent(), is_root=False)
+        self.assertEqual(action, 0)
+        # at the root it must still be tried (Q=0 init beats the bad Q=-0.5)
+        action, _ = mcts._select_child(make_parent(), is_root=True)
+        self.assertEqual(action, 1)
 
     def test_seeded_search_is_reproducible(self) -> None:
         state = GomokuState.new(size=10)

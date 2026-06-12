@@ -118,8 +118,10 @@ class MCTS:
                 search_path = [node]
 
                 while node.expanded:
-                    forced = use_forced and node is root
-                    action, node = self._select_child(node, forced=forced)
+                    is_root = node is root
+                    action, node = self._select_child(
+                        node, forced=use_forced and is_root, is_root=is_root
+                    )
                     scratch = scratch.apply(action)
                     search_path.append(node)
 
@@ -274,7 +276,9 @@ class MCTS:
         for node in search_path:
             node.visit_count -= 1
 
-    def _select_child(self, node: Node, forced: bool = False) -> tuple[int, Node]:
+    def _select_child(
+        self, node: Node, forced: bool = False, is_root: bool = False
+    ) -> tuple[int, Node]:
         parent_visits = max(1, node.visit_count)
 
         if forced:
@@ -305,7 +309,10 @@ class MCTS:
         # KataGo first-play urgency: estimate unvisited children slightly below
         # the parent's value instead of a flat 0, which is too optimistic for
         # the losing side and too pessimistic for the winning side.
-        fpu = self.config.fpu_reduction
+        # NOT at the root (KataGo's rootFpuReduction is likewise much weaker):
+        # when the prior misses a critical move (e.g. the only block of a four),
+        # root FPU keeps it pessimistic forever and the search never tries it.
+        fpu = 0.0 if is_root else self.config.fpu_reduction
         if fpu > 0:
             visited_mass = sum(
                 child.prior for child in node.children.values() if child.visit_count > 0

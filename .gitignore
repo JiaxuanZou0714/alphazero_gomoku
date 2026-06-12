@@ -6,3 +6,7 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+
+# large training artifacts (GitHub 100MB limit)
+outputs/checkpoints/
+outputs/replay/
