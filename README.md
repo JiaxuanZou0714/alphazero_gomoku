@@ -1,10 +1,6 @@
 # 10x10 AlphaZero 五子棋
 
-这是一个面向 `10x10` 棋盘的 AlphaZero 风格五子棋训练项目，并移植了多项 [KataGo](https://github.com/lightvector/KataGo) 的训练改进。当前仓库包含训练代码、单元测试、网页对弈界面、训练曲线图，以及最新保留的 checkpoint：
-
-```text
-outputs/checkpoints/a100-4-prod-v3/gomoku10_iter_0030.pt
-```
+这是一个面向 `10x10` 棋盘的 AlphaZero 风格五子棋训练项目，并移植了多项 [KataGo](https://github.com/lightvector/KataGo) 的训练改进。仓库包含训练代码、单元测试、网页对弈界面和完整 100 轮训练的指标与曲线图；最强模型 `gomoku10_best.pt` 约 115 MB，超出 GitHub 单文件限制，不随仓库分发（详见「当前模型」）。
 
 项目没有写入开局库、活三活四、威胁搜索或人工估值函数。代码里只编码了五子棋环境规则：
 
@@ -30,6 +26,69 @@ tests/         单元测试（规则、MCTS、训练组件）
 outputs/       checkpoint、metrics、plots
 ```
 
+## 算法原理
+
+这是一个 AlphaZero 风格的系统：**不学人类棋谱、不写棋类知识，只靠"自己跟自己下棋"从零学会五子棋**。整个系统由三个部件组成一个闭环：
+
+```text
+  ┌────────── 训练: 拟合 (局面, 搜索分布 π, 胜负 z) ──────────┐
+  │                                                       │
+  ▼                                                       │
+策略-价值网络 ──先验 P, 估值 v──▶ MCTS 搜索 ──比直觉更强──▶ 自我对弈
+ (model.py)                    (mcts.py)               (train.py)
+```
+
+闭环成立的关键洞察是：**MCTS 是一个"策略改进算子"**——给定网络当前的水平，搜索之后的落子分布总是不差于网络的直觉。于是把"搜索后的结论"当作监督目标去训练网络，网络的直觉就会逼近搜索结果；直觉变强后，同样模拟数的搜索又能看得更深。如此螺旋上升，不需要任何外部知识。
+
+### 1. 策略-价值网络（model.py）
+
+输入是 `2×10×10` 的两个平面：我方棋子和对方棋子——**始终以当前行棋方的视角编码**（`game.py` 的 `encode()`），所以网络不需要知道自己执黑还是执白，黑白共用同一套参数。
+
+主干是卷积残差塔（`a100-4` 预设：192 通道 × 12 块），每个残差块带 KataGo 式全局池化：把全盘的 avg+max 池化特征经线性层加回每个格子，让卷积的有限感受野也能"看见"全盘（比如远处有没有活三）。塔顶分出两个头：
+
+- **策略头**：输出 100 个落点的 logits——"直觉上该下哪"；
+- **价值头**：输出 `tanh` 后的标量 `v ∈ [-1, 1]`——"当前行棋方有多大胜算"。
+
+策略头给搜索提供方向（先看哪些走法），价值头取代传统 MCTS 的随机模拟（rollout）——叶子局面不用随机下完，直接问网络。
+
+### 2. MCTS：被网络引导的树搜索（mcts.py）
+
+每步棋执行若干次模拟（自对弈全量搜索 384 次）。每次模拟四步：
+
+1. **选择**：从根出发，按 PUCT 规则下行到叶子：
+
+   ```text
+   score(子节点) = Q + c_puct · P · sqrt(N_父) / (1 + N_子)
+   ```
+
+   `Q` 是该走法的平均估值（利用），右边一项随访问次数衰减（探索）：先验 `P` 高的走法先被尝试，被访问得多了探索奖励就让位给实际表现。
+2. **展开**：到达未展开的叶子时，用网络一次前向同时取得所有合法走法的先验和叶子估值。
+3. **估值**：叶子若是终局，用真实胜负（精确值）；否则用价值头的输出。
+4. **回传**：估值沿路径逐层回传，**每上一层取一次反**——因为父节点和子节点的"当前行棋方"是对手关系。这套视角约定贯穿全部代码：任何节点的 `Q` 都是"该节点轮到谁走、谁的胜算"（我们曾在这里栽过一个符号 bug，见复盘）。
+
+搜索结束后，根节点各子节点的**访问次数分布**就是结论：访问越多的走法越好。这个分布有两个用途——按它落子，以及作为训练目标。
+
+### 3. 自我对弈与训练目标（train.py）
+
+自对弈时模型同时扮演双方，每步记录 `(局面, 搜索分布 π, 终局胜负 z)`。为了产生多样化的数据而不是每盘都复读同一局：
+
+- **根节点 Dirichlet 噪声**：往根先验里混入随机噪声，强迫搜索分一部分模拟给冷门走法；
+- **温度采样**：前 `temperature_moves` 手按 π 概率采样落子（探索），之后贪心选最优——注意**训练目标始终是 τ=1 的完整分布**，温度只影响落子（见 KataGo 表）。
+
+训练损失由三部分组成：
+
+```text
+L = CE(策略头, π)  +  1.5 · MSE(价值头, 目标值)  +  4 · CE(软策略头, π^(1/4))
+```
+
+价值目标不是纯胜负，而是 `0.5·z + 0.5·MCTS根节点估值`——纯终局标签方差太大（开局的一手棋和 30 手后的胜负只有微弱因果），混入搜索估值能显著降噪。数据存进 replay buffer（滑动窗口 80k 局面），训练时每个样本随机施加八种对称变换之一。
+
+### 4. 评估与晋升：确认真的变强了
+
+自对弈训练有个著名陷阱：**loss 不可信**。数据分布随模型变强而漂移，loss 走平甚至上升都不代表停滞。所以每 5 轮做一次独立评估：候选模型 vs 当前 champion 打 16 局（随机配对开局、黑白互换），胜率 ≥ 0.55 才晋升为新 champion 并更新 `gomoku10_best.pt`；连续 3 次评估不过线则触发 early stopping。**评估胜率是唯一可信的进步信号**，本项目两次关键调参都是靠它而不是 loss 做的判断。
+
+在这套基础流程之上，我们移植了下面这些 KataGo 改进。
+
 ## KataGo 改进
 
 以下改进均可通过 `TrainConfig` 参数独立开关，默认全部关闭以保持向后兼容。`a100-4` 预设会全部开启。
@@ -39,7 +98,7 @@ outputs/       checkpoint、metrics、plots
 | 改进 | 参数 | 说明 |
 |------|------|------|
 | 全局池化 | `use_global_pool` | 残差块内 avg+max 池化 → Linear → 加性通道 bias（KataGo 风格），向每个格子广播全局棋盘信息；`a100-4` 预设用它替代 SE |
-| 辅助软策略头 | `use_soft_policy` + `soft_policy_loss_weight` | 第二个 policy head，训练目标 π^(1/T)，权重约 8×，加速学习非最优落点 |
+| 辅助软策略头 | `use_soft_policy` + `soft_policy_loss_weight` | 第二个 policy head，训练目标 π^(1/T)，加速学习非最优落点；权重实测 `4.0` 比 `8.0` 更稳（过高会淹没价值头梯度，见复盘） |
 
 ### MCTS
 
@@ -128,7 +187,7 @@ replay 窗口为 `80k` 原始局面（约 50 轮）。注意 replay 现在只存
 
 配套语义：`gomoku10_best.pt` 在开启评估时只在候选真实晋升时更新（即始终指向 champion 一系的最强模型）；未开启评估时保持旧行为（跟踪最新 checkpoint）。
 
-从已有 checkpoint 继续训练（checkpoint 必须由相同网络架构配置产出；仓库里保留的 `a100-4-prod-v3` 是旧版架构，不能用新预设 resume）：
+从已有 checkpoint 继续训练（checkpoint 必须由相同网络架构配置产出；`gomoku10_best.pt` 等 v3 产物可直接 resume，仓库内存档的 `gomoku10_iter_0030.pt` 是旧版架构、不能用新预设 resume）：
 
 ```bash
 python -m alphazero_gomoku.train \
@@ -145,8 +204,8 @@ python -m alphazero_gomoku.train \
 cd /Users/jiaxuanzou/Documents
 
 python -m alphazero_gomoku.play \
-  alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_iter_0030.pt \
-  --simulations 128 \
+  alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt \
+  --simulations 256 \
   --human black
 ```
 
@@ -158,8 +217,8 @@ python -m alphazero_gomoku.play \
 cd /Users/jiaxuanzou/Documents
 
 python -m alphazero_gomoku.web_play \
-  alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_iter_0030.pt \
-  --simulations 64
+  alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt \
+  --simulations 256
 ```
 
 然后打开：
