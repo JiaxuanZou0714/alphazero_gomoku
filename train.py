@@ -92,6 +92,7 @@ class TrainConfig:
     eval_opening_moves: int = 2         # random opening plies per eval game pair (colors swapped)
     promotion_threshold: float = 0.55
     gate_evaluation: bool = False
+    early_stop_evals: int = 0           # stop after N consecutive failed evaluations (0 = off)
     metrics_path: str = ""
     checkpoint_dir: str = "outputs/checkpoints"
     resume: str = ""
@@ -273,6 +274,7 @@ def preset_config(name: str) -> TrainConfig:
         cfg.eval_games = 16
         cfg.eval_simulations = 128
         cfg.promotion_threshold = 0.55
+        cfg.early_stop_evals = 3            # stop after 3 failed evals (15 stagnant iterations)
         return cfg
     if name == "a100-prod":
         cfg.iterations = 300
@@ -1309,6 +1311,13 @@ def run_training(cfg: TrainConfig) -> None:
     )
     scaler = make_grad_scaler(cfg.amp and cfg.device.startswith("cuda"), cfg.amp_dtype)
     champion = copy.deepcopy(base_model).to(cfg.device) if cfg.eval_interval and cfg.eval_games else None
+    if cfg.early_stop_evals > 0 and champion is None:
+        print(
+            "config_warning early_stop_disabled reason=evaluation_not_enabled "
+            "(set eval_interval and eval_games)",
+            flush=True,
+        )
+    failed_evals = 0
     run_start = time.monotonic()
 
     for iteration in range(start_iteration + 1, end_iteration + 1):
@@ -1364,7 +1373,13 @@ def run_training(cfg: TrainConfig) -> None:
 
         eval_stats = {"win_rate": 1.0, "wins": 0.0, "losses": 0.0, "draws": 0.0}
         promoted = True
-        if champion is not None and cfg.eval_interval > 0 and iteration % cfg.eval_interval == 0:
+        evaluated = (
+            champion is not None
+            and cfg.eval_interval > 0
+            and iteration % cfg.eval_interval == 0
+        )
+        stop_early = False
+        if evaluated:
             eval_stats = evaluate_candidate(
                 base_model, champion, cfg, rng=random.Random(cfg.seed + iteration * 7919)
             )
@@ -1379,12 +1394,21 @@ def run_training(cfg: TrainConfig) -> None:
             )
             if promoted:
                 champion.load_state_dict(base_model.state_dict())
-            elif cfg.gate_evaluation:
-                base_model.load_state_dict(champion.state_dict())
-                print(f"eval_reverted iter={iteration} reason=below_threshold", flush=True)
+                failed_evals = 0
+            else:
+                failed_evals += 1
+                if cfg.gate_evaluation:
+                    base_model.load_state_dict(champion.state_dict())
+                    print(f"eval_reverted iter={iteration} reason=below_threshold", flush=True)
+            if cfg.early_stop_evals > 0 and failed_evals >= cfg.early_stop_evals:
+                stop_early = True
 
         checkpoint = save_checkpoint(base_model, optimizer, cfg, iteration, stats)
-        if promoted:
+        # With gating enabled, "best" means the champion line: only update it on a
+        # real promotion. Without evaluation there is no champion, so best tracks
+        # the latest checkpoint as before.
+        update_best = (evaluated and promoted) if champion is not None else True
+        if update_best:
             best_path = best_checkpoint_path(cfg)
             best_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(checkpoint, best_path)
@@ -1429,7 +1453,10 @@ def run_training(cfg: TrainConfig) -> None:
                 "eval_wins": eval_stats["wins"],
                 "eval_losses": eval_stats["losses"],
                 "eval_draws": eval_stats["draws"],
+                "evaluated": evaluated,
                 "promoted": promoted,
+                "failed_evals": failed_evals,
+                "early_stopped": stop_early,
                 "iter_seconds": iteration_elapsed,
                 "total_seconds": total_elapsed,
                 "checkpoint": str(checkpoint),
@@ -1450,6 +1477,15 @@ def run_training(cfg: TrainConfig) -> None:
             f"total_eta={format_duration(total_eta)} saved={checkpoint}",
             flush=True,
         )
+        if stop_early:
+            print(
+                f"early_stop iter={iteration}/{end_iteration} "
+                f"consecutive_failed_evals={failed_evals} "
+                f"threshold={cfg.promotion_threshold:.3f} "
+                f"reason=candidate_not_beating_champion",
+                flush=True,
+            )
+            break
 
     save_replay(replay, kl_buffer, cfg.replay_path)
 
@@ -1534,6 +1570,7 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--eval-games", type=int, default=defaults.eval_games)
     parser.add_argument("--eval-simulations", type=int, default=defaults.eval_simulations)
     parser.add_argument("--eval-opening-moves", type=int, default=defaults.eval_opening_moves)
+    parser.add_argument("--early-stop-evals", type=int, default=defaults.early_stop_evals)
     parser.add_argument("--promotion-threshold", type=float, default=defaults.promotion_threshold)
     parser.add_argument("--gate-evaluation", dest="gate_evaluation", action="store_true")
     parser.add_argument("--no-gate-evaluation", dest="gate_evaluation", action="store_false")

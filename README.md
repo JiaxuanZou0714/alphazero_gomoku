@@ -109,6 +109,12 @@ python -m alphazero_gomoku.train \
 
 候选模型评估使用随机配对开局：每个随机开局（`eval_opening_moves` 步，默认 2）打两盘、候选模型黑白互换，既消除确定性搜索导致的重复对局，又抵消先手优势。
 
+### Early stopping
+
+自我对弈训练中 loss 走平不代表停滞（数据分布随模型变强而漂移），真正的停滞信号是评估胜率。`early_stop_evals` 设为 `N` 时（`a100-4` 预设为 3），候选模型连续 `N` 次评估打不过 champion 就提前结束训练并保存 replay，避免浪费算力。需要同时开启 `eval_interval` 和 `eval_games`。
+
+配套语义：`gomoku10_best.pt` 在开启评估时只在候选真实晋升时更新（即始终指向 champion 一系的最强模型）；未开启评估时保持旧行为（跟踪最新 checkpoint）。
+
 从已有 checkpoint 继续训练（checkpoint 必须由相同网络架构配置产出；仓库里保留的 `a100-4-prod-v3` 是旧版架构，不能用新预设 resume）：
 
 ```bash

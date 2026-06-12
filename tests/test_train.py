@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ from alphazero_gomoku.train import (
     play_self_game,
     random_opening,
     replay_to_dataset,
+    run_training,
     save_replay,
     train_epoch,
 )
@@ -134,6 +136,41 @@ class EvaluationTest(unittest.TestCase):
         )
         self.assertGreaterEqual(result["win_rate"], 0.0)
         self.assertLessEqual(result["win_rate"], 1.0)
+
+
+class EarlyStopTest(unittest.TestCase):
+    def test_stops_after_consecutive_failed_evals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            metrics_path = str(Path(tmp) / "metrics.jsonl")
+            cfg = TrainConfig(
+                iterations=5,
+                games_per_iteration=1,
+                simulations=4,
+                mcts_batch_size=2,
+                epochs=1,
+                train_steps_per_iteration=1,
+                batch_size=16,
+                channels=8,
+                residual_blocks=1,
+                value_hidden=16,
+                temperature_moves=4,
+                eval_interval=1,
+                eval_games=2,
+                eval_simulations=4,
+                promotion_threshold=2.0,  # impossible: every eval fails
+                early_stop_evals=1,
+                checkpoint_dir=str(Path(tmp) / "ckpt"),
+                metrics_path=metrics_path,
+                device="cpu",
+            )
+            run_training(cfg)
+            rows = [json.loads(line) for line in Path(metrics_path).read_text().splitlines()]
+            self.assertEqual(len(rows), 1)  # stopped after the first iteration
+            self.assertTrue(rows[0]["early_stopped"])
+            self.assertEqual(rows[0]["failed_evals"], 1)
+            self.assertFalse(rows[0]["promoted"])
+            # never promoted: the "best" checkpoint must not point at a stagnant model
+            self.assertFalse((Path(tmp) / "ckpt" / "gomoku10_best.pt").exists())
 
 
 class ReplayRoundTripTest(unittest.TestCase):
