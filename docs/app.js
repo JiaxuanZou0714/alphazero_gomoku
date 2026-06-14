@@ -21,8 +21,6 @@ const toast = document.querySelector("#toast");
 const newGameBtn = document.querySelector("#newGame");
 const undoBtn = document.querySelector("#undo");
 const analyzeBtn = document.querySelector("#analyze");
-const quickAnalyzeBtn = document.querySelector("#quickAnalyze");
-const explainLastMoveBtn = document.querySelector("#explainLastMove");
 const pvToggle = document.querySelector("#pvToggle");
 const overlayNote = document.querySelector("#overlayNote");
 const evalBlack = document.querySelector("#evalBlack");
@@ -53,8 +51,6 @@ const overlayButtons = [...document.querySelectorAll(".segment[data-overlay]")];
 let state = null;
 let selectedSide = "white";
 let overlayMode = "none";
-let analysisFocus = "current";
-let lastAiAnalysis = null;
 let busy = true;
 let cells = [];
 let requestId = 0;
@@ -62,12 +58,32 @@ const pending = new Map();
 
 const worker = new Worker("./engine.worker.js");
 
+const SIMULATION_OPTIONS = [16, 32, 64, 128, 256, 512];
 const playerName = (v) => (v === 1 ? "黑" : v === -1 ? "白" : "-");
 const pct = (v, digits = 0) => `${(v * 100).toFixed(digits)}%`;
 const moveText = (move) => (move ? `${move.row + 1},${move.col + 1}` : "-");
-const copyData = (value) => (typeof structuredClone === "function"
-  ? structuredClone(value)
-  : JSON.parse(JSON.stringify(value)));
+
+function simulationIndexFor(value) {
+  let bestIndex = 0;
+  let bestDistance = Infinity;
+  SIMULATION_OPTIONS.forEach((option, index) => {
+    const distance = Math.abs(option - value);
+    if (distance < bestDistance) {
+      bestIndex = index;
+      bestDistance = distance;
+    }
+  });
+  return bestIndex;
+}
+
+function selectedSimulations() {
+  return SIMULATION_OPTIONS[Number(simSlider.value)] || 256;
+}
+
+function syncSimulationDisplay(value = selectedSimulations()) {
+  simValue.textContent = value;
+  simSlider.setAttribute("aria-valuetext", `${value} 次`);
+}
 
 function syncOverlayButtons() {
   overlayButtons.forEach((button) => {
@@ -76,61 +92,12 @@ function syncOverlayButtons() {
 }
 
 function resetAnalysisView() {
-  analysisFocus = "current";
   overlayMode = "none";
   syncOverlayButtons();
 }
 
-function latestAiMoveFrom(nextState = state) {
-  if (!nextState || !nextState.history || !nextState.history.length) return null;
-  const move = nextState.history[nextState.history.length - 1];
-  return move && move.source === "ai" ? move : null;
-}
-
-function samePoint(a, b) {
-  return Boolean(a && b && a.row === b.row && a.col === b.col);
-}
-
-function rememberAiSearch(nextState) {
-  const lastAiMove = latestAiMoveFrom(nextState);
-  if (!lastAiMove) {
-    lastAiAnalysis = null;
-    return;
-  }
-
-  if (nextState.policySource === "ai_move" && nextState.analysis && nextState.analysis.candidates) {
-    lastAiAnalysis = {
-      movesPlayed: nextState.movesPlayed,
-      move: { row: lastAiMove.row, col: lastAiMove.col },
-      analysis: copyData(nextState.analysis),
-    };
-    return;
-  }
-
-  if (!lastAiAnalysis
-    || lastAiAnalysis.movesPlayed !== nextState.movesPlayed
-    || !samePoint(lastAiAnalysis.move, lastAiMove)) {
-    lastAiAnalysis = null;
-  }
-}
-
-function hasFreshAiSearch() {
-  const lastAiMove = latestAiMoveFrom();
-  return Boolean(lastAiMove
-    && lastAiAnalysis
-    && lastAiAnalysis.movesPlayed === state.movesPlayed
-    && samePoint(lastAiAnalysis.move, lastAiMove));
-}
-
 function activeAnalysisContext() {
   if (!state) return null;
-  if (analysisFocus === "ai" && hasFreshAiSearch()) {
-    return {
-      type: "ai",
-      analysis: lastAiAnalysis.analysis,
-      label: "AI 上手解释",
-    };
-  }
   if (state.policySource === "analysis"
     && state.analysis
     && state.analysis.candidates
@@ -198,7 +165,7 @@ function busyCopy(label) {
 
 function setBusy(nextBusy, label = "") {
   busy = nextBusy;
-  [newGameBtn, undoBtn, analyzeBtn, quickAnalyzeBtn, explainLastMoveBtn, simSlider, ...sideButtons].forEach((el) => {
+  [newGameBtn, undoBtn, analyzeBtn, simSlider, ...sideButtons].forEach((el) => {
     el.disabled = busy;
   });
   boardEl.classList.toggle("busy", busy);
@@ -328,6 +295,15 @@ function paintOverlays() {
     });
   }
 
+  if (overlayMode === "none") {
+    const selected = a.candidates && (a.candidates.find((c) => c.selected) || a.candidates[0]);
+    if (selected && state.board[selected.row][selected.col] === 0) {
+      const marker = document.createElement("span");
+      marker.className = "suggestion-marker";
+      cells[selected.row * state.size + selected.col].appendChild(marker);
+    }
+  }
+
   if (pvToggle.checked && a.pv && a.pv.length) {
     a.pv.forEach((m, i) => {
       if (state.board[m.row][m.col] !== 0) return;
@@ -356,10 +332,8 @@ function renderEval() {
     winMeterBlack.style.transform = "scaleX(0.5)";
     if (state && state.winner !== null) {
       evalSource.textContent = "对局已结束。";
-    } else if (hasFreshAiSearch()) {
-      evalSource.textContent = "当前局面还没深算；可生成建议，或解释 AI 刚才那手。";
     } else {
-      evalSource.textContent = "点“提示”或“生成建议”后评估当前局面。";
+      evalSource.textContent = "点“提示”后更新。";
     }
     statSims.textContent = "-";
     statTime.textContent = "-";
@@ -368,9 +342,7 @@ function renderEval() {
     evalLabel.textContent = pct(bw);
     evalBlack.style.transform = `scaleY(${bw.toFixed(3)})`;
     winMeterBlack.style.transform = `scaleX(${bw.toFixed(3)})`;
-    evalSource.textContent = context.type === "current"
-      ? `当前局面 · ${playerName(a.player)}方行棋`
-      : `AI 第 ${a.moveNumber + 1} 手搜索`;
+    evalSource.textContent = `当前局面 · ${playerName(a.player)}方行棋`;
     statSims.textContent = a.simulations;
     statTime.textContent = a.elapsedMs >= 1000
       ? `${(a.elapsedMs / 1000).toFixed(1)}s`
@@ -380,10 +352,9 @@ function renderEval() {
   turnEl.textContent = state.winner !== null ? "-" : playerName(state.currentPlayer);
 
   if (!a || !a.visitMap) {
-    overlayNote.textContent = "候选点会跟随上方“分析焦点”变化；先生成建议，或解释 AI 上手。";
+    overlayNote.textContent = "点“提示”后显示候选。";
   } else {
-    const src = context.type === "current" ? "当前局面深算" : "AI 上一手深算";
-    overlayNote.textContent = `${src} · ${a.simulations} sims · 倾向来自自学模型`;
+    overlayNote.textContent = `当前局面 · ${a.simulations} sims`;
   }
 }
 
@@ -392,70 +363,38 @@ function renderRecommendation() {
   const a = context && context.analysis;
   const cands = (a && a.candidates) || [];
   const isHumanTurn = state && state.winner === null && state.currentPlayer === state.humanPlayer;
-  const aiSearchReady = hasFreshAiSearch();
-
-  quickAnalyzeBtn.textContent = context && context.type === "current" ? "重新深算" : "生成建议";
-  quickAnalyzeBtn.disabled = busy || !state || state.winner !== null || !isHumanTurn;
-  explainLastMoveBtn.textContent = context && context.type === "ai" ? "回到当前局面" : "解释 AI 上手";
-  explainLastMoveBtn.disabled = busy || !aiSearchReady;
 
   if (!a || !cands.length) {
-    recommendationTitle.textContent = "分析焦点";
-    recommendationMove.textContent = isHumanTurn ? "当前局面" : "等待";
+    recommendationTitle.textContent = "提示";
+    recommendationMove.textContent = "-";
     recSearch.textContent = "-";
     recPolicy.textContent = "-";
     recWin.textContent = "-";
 
     if (state && state.winner !== null) {
-      recommendationMain.textContent = `${playerName(state.winner)}方获胜。可以新开一局，或在悔棋后继续分析。`;
+      recommendationMain.textContent = `${playerName(state.winner)}方获胜`;
     } else if (state && state.movesPlayed === 0 && isHumanTurn) {
-      recommendationMain.textContent = "你执黑先手。可以直接在棋盘落子，也可以先点“提示”，让模型用 MCTS 深算一个开局建议。";
-    } else if (aiSearchReady && isHumanTurn) {
-      recommendationMain.textContent = "现在轮到你。生成建议会分析当前局面；解释 AI 上手会切回它刚才落子前那轮搜索。";
+      recommendationMain.textContent = "你先手。直接下，或点“提示”。";
     } else if (isHumanTurn) {
-      recommendationMain.textContent = "点“提示”或“生成建议”，模型会只针对当前局面深算，并给出下一手候选。";
+      recommendationMain.textContent = "轮到你。点“提示”获取建议。";
     } else {
-      recommendationMain.textContent = "等待 AI 完成搜索和落子。它下完以后，再选择生成当前建议或查看它上一手的搜索。";
+      recommendationMain.textContent = "等待 AI 落子。";
     }
-    recommendationWhy.textContent = "页面现在只显示一个分析焦点：当前建议用于帮你下这一手，AI 上手解释只用于回看它刚才为什么那样下。";
+    recommendationWhy.textContent = "";
     return;
   }
 
   const selected = cands.find((c) => c.selected) || cands[0];
   const selectedWin = selected.q === null ? null : (selected.q + 1) / 2;
-  const winLeader = cands.reduce((best, c) => {
-    if (c.q === null) return best;
-    if (!best || c.q > best.q) return c;
-    return best;
-  }, null);
-  const policyLeader = cands.reduce((best, c) => (c.prior > best.prior ? c : best), cands[0]);
   const selectedMove = moveText(selected);
 
-  recommendationTitle.textContent = context.type === "current" ? "下一手建议" : "AI 上手解释";
+  recommendationTitle.textContent = "建议";
   recommendationMove.textContent = selectedMove;
   recSearch.textContent = pct(selected.share);
   recPolicy.textContent = pct(selected.prior, 1);
   recWin.textContent = selectedWin === null ? "-" : pct(selectedWin);
-  recommendationMain.textContent = context.type === "current"
-    ? `建议考虑 ${selectedMove}。这是这轮 MCTS 深算访问最多的点，代表模型想过之后最愿意继续展开的分支。`
-    : `AI 刚才落在 ${selectedMove}。这里展示的是它落子前那轮搜索，只用来解释上一手，不代表你当前该下这里。`;
-
-  const notes = [];
-  if (winLeader && winLeader !== selected) {
-    notes.push(`${moveText(winLeader)} 的分支胜率更高，但访问较少，估计更不稳定。`);
-  }
-  if (policyLeader && policyLeader !== selected) {
-    notes.push(`${moveText(policyLeader)} 是搜索前模型倾向更高的点，深算后主线转向了 ${selectedMove}。`);
-  }
-  if (!notes.length) {
-    notes.push("访问量、模型倾向和分支胜率方向一致，说明这个建议比较稳定。");
-  }
-  if (context.type === "current") {
-    notes.push("最终建议优先看深算访问量；胜率列用于理解该分支回传的局面评估。");
-  } else {
-    notes.push("这棵树是上一手的搜索快照；想知道现在怎么下，请回到当前局面并生成建议。");
-  }
-  recommendationWhy.textContent = notes.join(" ");
+  recommendationMain.textContent = `下在 ${selectedMove}`;
+  recommendationWhy.textContent = `${a.simulations} 次深算`;
 }
 
 function renderCandidates() {
@@ -463,15 +402,12 @@ function renderCandidates() {
   const a = context && context.analysis;
   candBody.innerHTML = "";
   const cands = (a && a.candidates) || [];
-  candidateTitle.textContent = context && context.type === "ai" ? "AI 上手候选" : "当前候选点";
+  candidateTitle.textContent = "候选点";
   policyCount.textContent = cands.length;
   if (!cands.length) {
     const tr = document.createElement("tr");
     tr.className = "empty-row";
-    const text = hasFreshAiSearch()
-      ? "当前局面还没有建议。生成建议看下一手，或解释 AI 上手看上一轮搜索。"
-      : "生成建议后，这里会列出当前局面的候选落点。";
-    tr.innerHTML = `<td colspan="5">${text}</td>`;
+    tr.innerHTML = `<td colspan="5">点“提示”后显示候选。</td>`;
     candBody.appendChild(tr);
     return;
   }
@@ -507,12 +443,10 @@ function renderTree() {
   const tree = a && a.tree;
   const nodes = tree && tree.nodes ? tree.nodes : [];
   const edges = tree && tree.edges ? tree.edges : [];
-  treeTitle.textContent = context && context.type === "ai" ? "AI 上手搜索树" : "MCTS 搜索树";
+  treeTitle.textContent = "MCTS 树";
   treeCopy.textContent = context
-    ? context.type === "current"
-      ? "这棵树是当前局面的搜索摘要：主线表示 MCTS 最后最愿意继续展开的路线，旁枝表示它认真比较过的备选。"
-      : "这是 AI 上一手落子前的搜索快照：用来回看它为什么下那里，不要把它当成当前下一手建议。"
-    : "生成建议后，这里会显示当前局面的 MCTS 搜索树；也可以切到 AI 上手解释，回看它刚才的搜索。";
+    ? "当前局面的搜索摘要。"
+    : "点“提示”后显示。";
   treeCount.textContent = Math.max(0, nodes.length - 1);
   treeDepth.textContent = nodes.length ? "深度 -" : "等待建议";
   treeSvg.setAttribute("aria-label", nodes.length
@@ -526,9 +460,7 @@ function renderTree() {
       class: "tree-empty",
       "text-anchor": "middle",
     });
-    const lines = hasFreshAiSearch()
-      ? ["当前没有建议树", "生成建议或解释 AI 上手"]
-      : ["还没有搜索树", "生成建议后显示 MCTS 摘要"];
+    const lines = ["还没有搜索树", "点“提示”后显示"];
     lines.forEach((line, index) => {
       const tspan = svgEl("tspan", {
         x: 420,
@@ -757,8 +689,6 @@ function renderChart() {
 
 function render(nextState) {
   state = nextState;
-  rememberAiSearch(state);
-  if (analysisFocus === "ai" && !hasFreshAiSearch()) analysisFocus = "current";
   if (!cells.length) buildBoard(state.size);
 
   renderBoard();
@@ -769,8 +699,9 @@ function render(nextState) {
   renderHistory();
   renderChart();
 
-  simValue.textContent = state.simulations;
-  simSlider.value = Math.min(Math.max(state.simulations, simSlider.min), simSlider.max);
+  const simIndex = simulationIndexFor(state.simulations);
+  simSlider.value = simIndex;
+  syncSimulationDisplay(SIMULATION_OPTIONS[simIndex]);
   sideLabel.textContent = state.humanPlayer === 1 ? "执黑" : "执白";
   statusPill.textContent = state.status;
   statusPill.className = `status-pill ${state.winner !== null ? "done" : ""}`;
@@ -782,7 +713,7 @@ async function newGame() {
     setBusy(true, "新对局");
     const nextState = await callWorker("newGame", {
       human: selectedSide,
-      simulations: Number(simSlider.value),
+      simulations: selectedSimulations(),
     });
     resetAnalysisView();
     render(nextState);
@@ -802,7 +733,7 @@ async function makeMove(row, col) {
     const nextState = await callWorker("move", {
       row,
       col,
-      simulations: Number(simSlider.value),
+      simulations: selectedSimulations(),
     });
     resetAnalysisView();
     render(nextState);
@@ -832,35 +763,14 @@ async function undo() {
 async function analyze() {
   if (busy || !state || state.winner !== null) return;
   try {
-    analysisFocus = "current";
     setBusy(true, "生成提示");
-    render(await callWorker("analyze", { simulations: Number(simSlider.value) }));
-    if (overlayMode === "none") setOverlay("search");
+    render(await callWorker("analyze", { simulations: selectedSimulations() }));
   } catch (error) {
     showToast(error.message);
   } finally {
     setBusy(false);
     if (state) render(state);
   }
-}
-
-function toggleAiSearchExplanation() {
-  if (busy || !state) return;
-  if (analysisFocus === "ai") {
-    analysisFocus = "current";
-    if (!activeAnalysisContext()) overlayMode = "none";
-    syncOverlayButtons();
-    render(state);
-    return;
-  }
-  if (!hasFreshAiSearch()) {
-    showToast("还没有可解释的 AI 上一手");
-    return;
-  }
-  analysisFocus = "ai";
-  if (overlayMode === "none") overlayMode = "search";
-  syncOverlayButtons();
-  render(state);
 }
 
 function setOverlay(mode) {
@@ -885,13 +795,11 @@ pvToggle.addEventListener("change", () => {
   if (state) renderBoard();
 });
 simSlider.addEventListener("input", () => {
-  simValue.textContent = simSlider.value;
+  syncSimulationDisplay();
 });
 newGameBtn.addEventListener("click", newGame);
 undoBtn.addEventListener("click", undo);
 analyzeBtn.addEventListener("click", analyze);
-quickAnalyzeBtn.addEventListener("click", analyze);
-explainLastMoveBtn.addEventListener("click", toggleAiSearchExplanation);
 window.addEventListener("resize", () => {
   if (state) renderChart();
 });

@@ -56,23 +56,6 @@
           </div>
         </div>
 
-        <div class="overlay-controls">
-          <div class="overlay-toolbox">
-            <div class="segmented overlay-seg" role="group" aria-label="叠加层">
-              <button class="segment active" data-overlay="none" type="button">棋盘</button>
-              <button class="segment" data-overlay="search" type="button">深算</button>
-              <button class="segment" data-overlay="policy" type="button">倾向</button>
-            </div>
-            <p class="overlay-help">
-              深算=AI 想过之后重点看的点；倾向=搜索前模型按自学经验给出的落点概率。
-            </p>
-          </div>
-          <label class="pv-toggle">
-            <input id="pvToggle" type="checkbox" checked />
-            <span>主线预测</span>
-            <small>数字表示双方按搜索主线走的顺序</small>
-          </label>
-        </div>
       </section>
 
       <aside class="side-pane">
@@ -89,7 +72,7 @@
           <label class="slider-row">
             <span>深算次数</span>
             <strong id="simValue">256</strong>
-            <input id="simSlider" type="range" min="16" max="384" step="16" value="256" />
+            <input id="simSlider" type="range" min="0" max="5" step="1" value="4" />
           </label>
 
           <div class="actions">
@@ -101,24 +84,18 @@
 
         <section class="panel recommendation" aria-live="polite">
           <div class="panel-title">
-            <span id="recommendationTitle">分析焦点</span>
-            <strong id="recommendationMove">当前局面</strong>
+            <span id="recommendationTitle">提示</span>
+            <strong id="recommendationMove">-</strong>
           </div>
           <p class="recommendation-main" id="recommendationMain">
-            模型加载后会自动开局。轮到你时点“提示”，AI 会先用 MCTS 深算，再给出下一手建议。
+            轮到你时点“提示”。
           </p>
           <div class="recommendation-metrics" aria-label="建议依据">
             <div><span>深算占比</span><strong id="recSearch">-</strong></div>
             <div><span>模型倾向</span><strong id="recPolicy">-</strong></div>
             <div><span>分支胜率</span><strong id="recWin">-</strong></div>
           </div>
-          <p class="recommendation-why" id="recommendationWhy">
-            深算看访问量，倾向看神经网络搜索前的自学判断；两者一起帮助你理解模型为什么关注这个点。
-          </p>
-          <div class="analysis-actions">
-            <button class="compact-action" id="quickAnalyze" type="button">生成建议</button>
-            <button class="compact-action secondary" id="explainLastMove" type="button">解释 AI 上手</button>
-          </div>
+          <p class="recommendation-why" id="recommendationWhy"></p>
         </section>
 
         <section class="panel stats">
@@ -141,20 +118,6 @@
           <canvas id="evalChart" height="120"></canvas>
         </section>
 
-        <section class="panel candidates">
-          <div class="panel-title">
-            <span id="candidateTitle">当前候选点</span>
-            <strong id="policyCount">0</strong>
-          </div>
-          <p class="source" id="overlayNote">占比=深算时花在这个点上的比例；倾向=模型自学出的落点概率，不含人工规则</p>
-          <table>
-            <thead>
-              <tr><th>点位</th><th>模拟</th><th>占比</th><th>倾向</th><th>胜率</th></tr>
-            </thead>
-            <tbody id="candBody"></tbody>
-          </table>
-        </section>
-
         <section class="panel history">
           <div class="panel-title">
             <span>棋谱</span>
@@ -164,22 +127,54 @@
         </section>
       </aside>
 
-      <section class="panel tree-panel">
-        <div class="panel-title">
-          <span id="treeTitle">MCTS 搜索树</span>
-          <strong id="treeCount">0</strong>
+      <details class="analysis-details">
+        <summary>分析详情</summary>
+        <div class="overlay-controls">
+          <div class="overlay-toolbox">
+            <div class="segmented overlay-seg" role="group" aria-label="叠加层">
+              <button class="segment active" data-overlay="none" type="button">棋盘</button>
+              <button class="segment" data-overlay="search" type="button">深算</button>
+              <button class="segment" data-overlay="policy" type="button">倾向</button>
+            </div>
+            <p class="overlay-help">深算=搜索后重点看的点；倾向=模型第一眼的落点概率。</p>
+          </div>
+          <label class="pv-toggle">
+            <input id="pvToggle" type="checkbox" />
+            <span>主线预测</span>
+            <small>显示后续路线编号</small>
+          </label>
         </div>
-        <p class="tree-copy" id="treeCopy">
-          摘要树只画访问最多的主干和分支：圆越大表示模拟越多，线越粗表示这个分支被继续展开得越多，红线是当前主线。
-        </p>
-        <div class="tree-legend" aria-label="MCTS 图例">
-          <span><i class="legend-line main"></i>主线</span>
-          <span><i class="legend-line branch"></i>候选分支</span>
-          <span><i class="legend-dot"></i>模拟局面</span>
-          <strong id="treeDepth">深度 -</strong>
+        <div class="analysis-detail-grid">
+          <section class="panel candidates">
+            <div class="panel-title">
+              <span id="candidateTitle">候选点</span>
+              <strong id="policyCount">0</strong>
+            </div>
+            <p class="source" id="overlayNote">点“提示”后显示候选。</p>
+            <table>
+              <thead>
+                <tr><th>点位</th><th>模拟</th><th>占比</th><th>倾向</th><th>胜率</th></tr>
+              </thead>
+              <tbody id="candBody"></tbody>
+            </table>
+          </section>
+
+          <section class="panel tree-panel">
+            <div class="panel-title">
+              <span id="treeTitle">MCTS 树</span>
+              <strong id="treeCount">0</strong>
+            </div>
+            <p class="tree-copy" id="treeCopy">点“提示”后显示。</p>
+            <div class="tree-legend" aria-label="MCTS 图例">
+              <span><i class="legend-line main"></i>主线</span>
+              <span><i class="legend-line branch"></i>分支</span>
+              <span><i class="legend-dot"></i>节点</span>
+              <strong id="treeDepth">等待建议</strong>
+            </div>
+            <svg id="treeSvg" class="tree-svg" viewBox="0 0 840 380" role="img" aria-label="MCTS 搜索树"></svg>
+          </section>
         </div>
-        <svg id="treeSvg" class="tree-svg" viewBox="0 0 840 380" role="img" aria-label="MCTS 搜索树"></svg>
-      </section>
+      </details>
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
