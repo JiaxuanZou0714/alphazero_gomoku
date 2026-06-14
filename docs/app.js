@@ -262,6 +262,7 @@ function renderChart() {
   const dpr = window.devicePixelRatio || 1;
   const cssW = chartCanvas.clientWidth || 280;
   const cssH = chartCanvas.clientHeight || 110;
+  const style = getComputedStyle(document.documentElement);
   chartCanvas.width = cssW * dpr;
   chartCanvas.height = cssH * dpr;
   ctx.scale(dpr, dpr);
@@ -272,7 +273,7 @@ function renderChart() {
   const h = cssH - pad.t - pad.b;
   const data = state.evalHistory || [];
 
-  ctx.strokeStyle = "rgba(120,110,90,0.25)";
+  ctx.strokeStyle = "rgba(111,120,109,0.22)";
   ctx.lineWidth = 1;
   ctx.strokeRect(pad.l, pad.t, w, h);
   ctx.setLineDash([4, 4]);
@@ -293,8 +294,23 @@ function renderChart() {
     if (i === 0) ctx.moveTo(x(d.move), y(d.blackWinProb));
     else ctx.lineTo(x(d.move), y(d.blackWinProb));
   });
-  ctx.strokeStyle = "rgba(40,40,36,0.9)";
-  ctx.lineWidth = 1.8;
+  ctx.lineTo(x(data[data.length - 1].move), pad.t + h);
+  ctx.lineTo(x(data[0].move), pad.t + h);
+  ctx.closePath();
+  const fill = ctx.createLinearGradient(0, pad.t, 0, pad.t + h);
+  fill.addColorStop(0, "rgba(27,122,115,0.18)");
+  fill.addColorStop(1, "rgba(194,75,51,0.06)");
+  ctx.fillStyle = fill;
+  ctx.fill();
+
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    if (i === 0) ctx.moveTo(x(d.move), y(d.blackWinProb));
+    else ctx.lineTo(x(d.move), y(d.blackWinProb));
+  });
+  ctx.strokeStyle = style.getPropertyValue("--accent-2").trim() || "rgba(27,122,115,0.95)";
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.stroke();
 }
