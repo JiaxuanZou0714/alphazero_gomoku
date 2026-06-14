@@ -207,9 +207,70 @@ replay 窗口为 `80k` 原始局面（约 50 轮）。注意 replay 现在只存
 
 配套语义：`gomoku10_best.pt` 在开启评估时只在候选真实晋升时更新（即始终指向 champion 一系的最强模型）；未开启评估时保持旧行为（跟踪最新 checkpoint）。
 
-## 使用本地 RTX 3080 启动 v3
+## v3 推荐路线：old best 蒸馏轻量 student
 
-本地 `v3-local` 预设从 old best 继续训练，但比远端 A100 预设更保守：`48` 局/轮、`256` sims、`4` 个自我对弈 worker、`1024` batch、`50k` replay。评估每 5 轮运行一次，开启 `gate_evaluation`，候选打不过 champion 时会回滚，避免再次出现 v2 那种退化分支继续产出 checkpoint 的情况。
+不要直接从 old best 继续长训。先用 old best 蒸馏一个更轻的 student，再让 student 进入 KataGo-style RL。
+
+第一步，生成 teacher 数据并训练轻量 student：
+
+```bat
+scripts\distill_old_best_light.cmd
+```
+
+默认输出：
+
+```text
+outputs/checkpoints/distill-oldbest-light/gomoku10_student_best.pt
+outputs/checkpoints/distill-oldbest-light/gomoku10_student_final.pt
+outputs/metrics/distill-oldbest-light.jsonl
+outputs/logs/distill_oldbest_light.out.log
+outputs/logs/distill_oldbest_light.err.log
+```
+
+快速烟测可以只跑极小数据量：
+
+```bat
+scripts\distill_old_best_light.cmd --games 2 --epochs 1 --batch-size 32 --device cpu
+```
+
+如果 raw policy/value 蒸馏后的 benchmark 仍明显落后，先用 old best MCTS targets 继续微调，不要直接进入 RL：
+
+```bat
+scripts\distill_old_best_light.cmd ^
+  --student-resume outputs\checkpoints\distill-oldbest-light\gomoku10_student_best.pt ^
+  --games 256 ^
+  --random-opening-moves 8 ^
+  --teacher-sims 64 ^
+  --mcts-target-prob 0.25 ^
+  --epochs 12 ^
+  --batch-size 1024 ^
+  --learning-rate 1e-4
+```
+
+第二步，只有当 student 通过 benchmark 后，才启动 student RL：
+
+```bash
+python -m alphazero_gomoku.train --preset v3-student-local
+```
+
+`v3-student-local` 使用 `96` channels、`6` 个 residual blocks、全局池化和软策略头，比 old best 的 `192x12` 更轻。RL 阶段仍保留 KataGo 风格的 root policy temperature、shaped Dirichlet、dynamic cPUCT、FPU、forced playouts、playout cap randomization、随机开局评估和 champion gate。它还会在 replay 低于 `25k` 原始局面时跳过训练，并把每轮训练步数限制为最多扫 replay `2` 遍，避免 v2 那种小 replay 反复拟合。
+
+进入 RL 前至少跑一次：
+
+```bash
+python alphazero_gomoku/scripts/benchmark_checkpoints.py \
+  --candidate alphazero_gomoku/outputs/checkpoints/distill-oldbest-light/gomoku10_student_best.pt \
+  --baseline alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt \
+  --candidate-sims 128,256 \
+  --baseline-sims 256 \
+  --games 16
+```
+
+如果这个 benchmark 低于约 `0.45`，继续蒸馏或调整 student 容量；不要启动 `v3-student-local`。
+
+## 使用本地 RTX 3080 启动旧 v3 预设
+
+旧的 `v3-local` 预设会从 old best 直接继续训练，目前不作为推荐路线。保留它只是为了复现实验；推荐先走上面的 distill -> `v3-student-local`。
 
 ```bat
 scripts\train_v3_local.cmd

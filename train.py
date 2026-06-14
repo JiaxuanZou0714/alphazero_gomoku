@@ -45,6 +45,8 @@ class TrainConfig:
     train_steps_per_iteration: int = 0
     batch_size: int = 64
     replay_size: int = 10_000
+    min_replay_size: int = 0
+    max_train_replay_passes: float = 0.0
     learning_rate: float = 1.0e-3
     min_learning_rate: float = 0.0
     lr_schedule: str = "constant"
@@ -294,6 +296,8 @@ def preset_config(name: str) -> TrainConfig:
         cfg.train_steps_per_iteration = 64
         cfg.batch_size = 1024
         cfg.replay_size = 50_000
+        cfg.min_replay_size = 20_000
+        cfg.max_train_replay_passes = 2.0
         cfg.learning_rate = 4.0e-5
         cfg.min_learning_rate = 8.0e-6
         cfg.lr_schedule = "cosine"
@@ -332,6 +336,62 @@ def preset_config(name: str) -> TrainConfig:
         cfg.data_parallel = False
         cfg.eval_interval = 5
         cfg.eval_games = 16
+        cfg.eval_simulations = 256
+        cfg.eval_opening_moves = 4
+        cfg.eval_progress_interval = 1
+        cfg.eval_early_cutoff = True
+        cfg.promotion_threshold = 0.55
+        cfg.gate_evaluation = True
+        cfg.early_stop_evals = 3
+        return cfg
+    if name == "v3-student-local":
+        cfg.iterations = 80
+        cfg.games_per_iteration = 96
+        cfg.simulations = 256
+        cfg.mcts_batch_size = 32
+        cfg.epochs = 2
+        cfg.train_steps_per_iteration = 96
+        cfg.batch_size = 2048
+        cfg.replay_size = 80_000
+        cfg.min_replay_size = 25_000
+        cfg.max_train_replay_passes = 2.0
+        cfg.learning_rate = 6.0e-5
+        cfg.min_learning_rate = 8.0e-6
+        cfg.lr_schedule = "cosine"
+        cfg.warmup_iterations = 3
+        cfg.weight_decay = 1.0e-4
+        cfg.max_grad_norm = 10.0
+        cfg.temperature_moves = 12
+        cfg.mcts_c_puct = 1.25
+        cfg.mcts_dirichlet_alpha = 0.15
+        cfg.channels = 96
+        cfg.residual_blocks = 6
+        cfg.policy_channels = 8
+        cfg.value_channels = 4
+        cfg.value_hidden = 256
+        cfg.use_global_pool = True
+        cfg.use_soft_policy = True
+        cfg.soft_policy_loss_weight = 2.0
+        cfg.value_loss_weight = 1.25
+        cfg.surprise_weighting = False
+        cfg.mcts_value_weight = 0.25
+        cfg.mcts_root_policy_temp = 1.1
+        cfg.mcts_shaped_dirichlet = True
+        cfg.mcts_dynamic_cpuct = True
+        cfg.mcts_fpu_reduction = 0.2
+        cfg.mcts_forced_playouts = True
+        cfg.playout_cap_randomization = True
+        cfg.full_search_prob = 0.35
+        cfg.fast_simulations = 64
+        cfg.checkpoint_dir = "alphazero_gomoku/outputs/checkpoints/v3-student-local"
+        cfg.replay_path = "alphazero_gomoku/outputs/replay/v3-student-local_replay.pt"
+        cfg.replay_save_interval = 2
+        cfg.metrics_path = "alphazero_gomoku/outputs/metrics/v3-student-local.jsonl"
+        cfg.resume = "alphazero_gomoku/outputs/checkpoints/distill-oldbest-light/gomoku10_student_best.pt"
+        cfg.self_play_workers = 4
+        cfg.self_play_devices = "auto"
+        cfg.eval_interval = 5
+        cfg.eval_games = 20
         cfg.eval_simulations = 256
         cfg.eval_opening_moves = 4
         cfg.eval_progress_interval = 1
@@ -1011,6 +1071,16 @@ def replay_to_dataset(
     return dataset, weights
 
 
+def effective_train_steps(cfg: TrainConfig, examples: int) -> int:
+    if cfg.train_steps_per_iteration <= 0:
+        return cfg.train_steps_per_iteration
+    if cfg.max_train_replay_passes <= 0:
+        return cfg.train_steps_per_iteration
+    batches = max(1, math.ceil(examples / max(1, cfg.batch_size)))
+    capped_steps = max(1, math.ceil(cfg.max_train_replay_passes * batches))
+    return min(cfg.train_steps_per_iteration, capped_steps)
+
+
 def train_epoch(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -1019,6 +1089,7 @@ def train_epoch(
     scaler: object | None,
     dataset: TensorDataset | None = None,
     sample_weights: torch.Tensor | None = None,
+    train_steps_to_run: int | None = None,
 ) -> TrainStats:
     if dataset is None:
         dataset, sample_weights = replay_to_dataset(
@@ -1058,7 +1129,12 @@ def train_epoch(
     totals = TrainStats(lr=float(optimizer.param_groups[0]["lr"]))
     autocast_ctx = autocast_context(cfg.device, cfg.amp, cfg.amp_dtype)
 
-    steps_to_run = cfg.train_steps_per_iteration if cfg.train_steps_per_iteration > 0 else len(loader)
+    if train_steps_to_run is not None:
+        steps_to_run = train_steps_to_run
+    elif cfg.train_steps_per_iteration > 0:
+        steps_to_run = cfg.train_steps_per_iteration
+    else:
+        steps_to_run = len(loader)
     loader_iter = iter(loader)
     policy_samples = 0.0
     for _ in range(steps_to_run):
@@ -1537,32 +1613,60 @@ def run_training(cfg: TrainConfig) -> None:
             flush=True,
         )
 
-        stats = TrainStats()
-        train_dataset, train_weights = replay_to_dataset(
-            replay, kl_buffer if cfg.surprise_weighting else None
-        )
-        if cfg.surprise_weighting and train_weights is None:
+        stats = TrainStats(lr=float(optimizer.param_groups[0]["lr"]))
+        train_skipped_min_replay = len(replay) < cfg.min_replay_size
+        train_steps_to_run = cfg.train_steps_per_iteration
+        if train_skipped_min_replay:
             print(
-                "train_warning surprise_weighting_disabled reason=kl_buffer_mismatch "
-                f"kl={len(kl_buffer)} replay={len(replay)}",
+                "train_skip "
+                f"iter={iteration}/{end_iteration} reason=min_replay "
+                f"replay={len(replay)} min_replay_size={cfg.min_replay_size}",
                 flush=True,
             )
-        for epoch in range(1, cfg.epochs + 1):
-            epoch_start = time.monotonic()
-            stats = train_epoch(model, optimizer, replay, cfg, scaler, train_dataset, train_weights)
-            print(
-                f"train_progress iter={iteration}/{end_iteration} "
-                f"epoch={epoch}/{cfg.epochs} elapsed={format_duration(time.monotonic() - epoch_start)} "
-                f"loss={stats.loss:.4f} policy={stats.policy_loss:.4f} "
-                f"soft_policy={stats.soft_policy_loss:.4f} "
-                f"value={stats.value_loss:.4f} policy_kl={stats.policy_kl:.4f} "
-                f"target_entropy={stats.target_entropy:.4f} pred_entropy={stats.pred_entropy:.4f} "
-                f"policy_top1={stats.policy_top1:.4f} value_mae={stats.value_mae:.4f} "
-                f"value_acc={stats.value_acc:.4f} grad_norm={stats.grad_norm:.4f} "
-                f"steps={stats.optimizer_steps} lr={stats.lr:.6g} "
-                f"skipped={stats.skipped} value_clamps={stats.value_clamps}",
-                flush=True,
+        else:
+            train_dataset, train_weights = replay_to_dataset(
+                replay, kl_buffer if cfg.surprise_weighting else None
             )
+            train_steps_to_run = effective_train_steps(cfg, len(train_dataset))
+            if train_steps_to_run != cfg.train_steps_per_iteration:
+                print(
+                    "train_steps_capped "
+                    f"iter={iteration}/{end_iteration} requested={cfg.train_steps_per_iteration} "
+                    f"effective={train_steps_to_run} replay={len(train_dataset)} "
+                    f"batch_size={cfg.batch_size} max_train_replay_passes={cfg.max_train_replay_passes}",
+                    flush=True,
+                )
+            if cfg.surprise_weighting and train_weights is None:
+                print(
+                    "train_warning surprise_weighting_disabled reason=kl_buffer_mismatch "
+                    f"kl={len(kl_buffer)} replay={len(replay)}",
+                    flush=True,
+                )
+            for epoch in range(1, cfg.epochs + 1):
+                epoch_start = time.monotonic()
+                stats = train_epoch(
+                    model,
+                    optimizer,
+                    replay,
+                    cfg,
+                    scaler,
+                    train_dataset,
+                    train_weights,
+                    train_steps_to_run=train_steps_to_run,
+                )
+                print(
+                    f"train_progress iter={iteration}/{end_iteration} "
+                    f"epoch={epoch}/{cfg.epochs} elapsed={format_duration(time.monotonic() - epoch_start)} "
+                    f"loss={stats.loss:.4f} policy={stats.policy_loss:.4f} "
+                    f"soft_policy={stats.soft_policy_loss:.4f} "
+                    f"value={stats.value_loss:.4f} policy_kl={stats.policy_kl:.4f} "
+                    f"target_entropy={stats.target_entropy:.4f} pred_entropy={stats.pred_entropy:.4f} "
+                    f"policy_top1={stats.policy_top1:.4f} value_mae={stats.value_mae:.4f} "
+                    f"value_acc={stats.value_acc:.4f} grad_norm={stats.grad_norm:.4f} "
+                    f"steps={stats.optimizer_steps} lr={stats.lr:.6g} "
+                    f"skipped={stats.skipped} value_clamps={stats.value_clamps}",
+                    flush=True,
+                )
 
         eval_stats = {
             "win_rate": 1.0,
@@ -1575,6 +1679,7 @@ def run_training(cfg: TrainConfig) -> None:
         promoted = True
         evaluated = (
             champion is not None
+            and not train_skipped_min_replay
             and cfg.eval_interval > 0
             and iteration % cfg.eval_interval == 0
         )
@@ -1650,6 +1755,10 @@ def run_training(cfg: TrainConfig) -> None:
                 "grad_norm": stats.grad_norm,
                 "lr": stats.lr,
                 "optimizer_steps": stats.optimizer_steps,
+                "train_skipped_min_replay": train_skipped_min_replay,
+                "train_steps_effective": train_steps_to_run,
+                "min_replay_size": cfg.min_replay_size,
+                "max_train_replay_passes": cfg.max_train_replay_passes,
                 "skipped": stats.skipped,
                 "value_clamps": stats.value_clamps,
                 "selfplay_entropy": selfplay_stats["policy_entropy"],
@@ -1705,7 +1814,16 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--preset",
-        choices=["local", "v2", "v3-local", "a100-4", "a100-fast", "a100-turbo", "a100-prod"],
+        choices=[
+            "local",
+            "v2",
+            "v3-local",
+            "v3-student-local",
+            "a100-4",
+            "a100-fast",
+            "a100-turbo",
+            "a100-prod",
+        ],
         default=defaults.preset,
     )
     parser.add_argument("--board-size", type=int, default=defaults.board_size)
@@ -1718,6 +1836,8 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--train-steps-per-iteration", type=int, default=defaults.train_steps_per_iteration)
     parser.add_argument("--batch-size", type=int, default=defaults.batch_size)
     parser.add_argument("--replay-size", type=int, default=defaults.replay_size)
+    parser.add_argument("--min-replay-size", type=int, default=defaults.min_replay_size)
+    parser.add_argument("--max-train-replay-passes", type=float, default=defaults.max_train_replay_passes)
     parser.add_argument("--channels", type=int, default=defaults.channels)
     parser.add_argument("--residual-blocks", type=int, default=defaults.residual_blocks)
     parser.add_argument("--policy-channels", type=int, default=defaults.policy_channels)
@@ -1824,7 +1944,16 @@ def main() -> None:
     preset_parser = argparse.ArgumentParser(add_help=False)
     preset_parser.add_argument(
         "--preset",
-        choices=["local", "v2", "v3-local", "a100-4", "a100-fast", "a100-turbo", "a100-prod"],
+        choices=[
+            "local",
+            "v2",
+            "v3-local",
+            "v3-student-local",
+            "a100-4",
+            "a100-fast",
+            "a100-turbo",
+            "a100-prod",
+        ],
         default="local",
     )
     preset_args, _ = preset_parser.parse_known_args()

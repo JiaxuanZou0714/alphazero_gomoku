@@ -16,6 +16,7 @@ from alphazero_gomoku.train import (
     TrainConfig,
     apply_random_symmetries,
     evaluate_candidate,
+    effective_train_steps,
     load_replay,
     play_self_game,
     random_opening,
@@ -117,6 +118,25 @@ class TrainEpochTest(unittest.TestCase):
         replay = deque(make_examples(64))
         stats = train_epoch(model, optimizer, replay, cfg, scaler=None)
         self.assertEqual(stats.optimizer_steps, 2)
+        self.assertTrue(np.isfinite(stats.loss))
+
+    def test_effective_train_steps_caps_replay_passes(self) -> None:
+        cfg = TrainConfig(
+            batch_size=16,
+            train_steps_per_iteration=10,
+            max_train_replay_passes=1.0,
+        )
+        self.assertEqual(effective_train_steps(cfg, examples=56), 4)
+
+    def test_train_epoch_accepts_step_override(self) -> None:
+        cfg = TrainConfig(batch_size=16, train_steps_per_iteration=10)
+        cfg.device = "cpu"
+        cfg.amp = False
+        model = tiny_model()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+        replay = deque(make_examples(64))
+        stats = train_epoch(model, optimizer, replay, cfg, scaler=None, train_steps_to_run=3)
+        self.assertEqual(stats.optimizer_steps, 3)
         self.assertTrue(np.isfinite(stats.loss))
 
 
