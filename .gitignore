@@ -10,3 +10,4 @@ venv/
 # large training artifacts (GitHub 100MB limit)
 outputs/checkpoints/
 outputs/replay/
+docs/assets/model/*.onnx

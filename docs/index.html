@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AlphaZero 五子棋</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="board-pane" aria-label="棋盘">
+        <div class="topbar">
+          <div>
+            <p class="eyebrow">10x10 Gomoku · Browser AlphaZero</p>
+            <h1>AlphaZero 五子棋 <span>静态版</span></h1>
+          </div>
+          <div class="status-pill loading" id="statusPill">加载模型</div>
+        </div>
+
+        <div class="load-line" id="loadLine">
+          <div class="load-bar"><span id="loadBar"></span></div>
+          <span id="loadText">准备加载</span>
+        </div>
+
+        <div class="board-area">
+          <div class="eval-bar" title="黑方胜率">
+            <div class="eval-black" id="evalBlack"></div>
+            <span class="eval-label" id="evalLabel">-</span>
+          </div>
+          <div class="board-wrap">
+            <div class="coordinates columns" id="colCoords"></div>
+            <div class="board-row">
+              <div class="coordinates rows" id="rowCoords"></div>
+              <div class="board" id="board" aria-label="棋盘" role="grid"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="overlay-controls">
+          <div class="segmented overlay-seg" role="group" aria-label="叠加层">
+            <button class="segment active" data-overlay="none" type="button">棋盘</button>
+            <button class="segment" data-overlay="search" type="button">搜索</button>
+            <button class="segment" data-overlay="prior" type="button">先验</button>
+          </div>
+          <label class="pv-toggle">
+            <input id="pvToggle" type="checkbox" checked />
+            <span>PV</span>
+          </label>
+        </div>
+      </section>
+
+      <aside class="side-pane">
+        <section class="panel controls">
+          <div class="panel-title">
+            <span>对局</span>
+            <strong id="sideLabel">执黑</strong>
+          </div>
+          <div class="segmented" role="group" aria-label="执棋">
+            <button class="segment active" data-side="black" type="button">我执黑</button>
+            <button class="segment" data-side="white" type="button">我执白</button>
+          </div>
+
+          <label class="slider-row">
+            <span>搜索量</span>
+            <strong id="simValue">256</strong>
+            <input id="simSlider" type="range" min="16" max="384" step="16" value="256" />
+          </label>
+
+          <div class="actions">
+            <button id="newGame" type="button">新对局</button>
+            <button class="secondary" id="undo" type="button">悔棋</button>
+            <button class="secondary" id="analyze" type="button">分析</button>
+          </div>
+        </section>
+
+        <section class="panel stats">
+          <div class="panel-title">
+            <span>局面评估</span>
+            <strong id="winProb">-</strong>
+          </div>
+          <dl>
+            <div><dt>手数</dt><dd id="moves">0</dd></div>
+            <div><dt>轮到</dt><dd id="turn">-</dd></div>
+            <div><dt>搜索</dt><dd id="statSims">-</dd></div>
+            <div><dt>耗时</dt><dd id="statTime">-</dd></div>
+          </dl>
+          <p class="source" id="evalSource">-</p>
+          <canvas id="evalChart" height="120"></canvas>
+        </section>
+
+        <section class="panel candidates">
+          <div class="panel-title">
+            <span>候选点</span>
+            <strong id="policyCount">0</strong>
+          </div>
+          <p class="source" id="overlayNote">-</p>
+          <table>
+            <thead>
+              <tr><th>点位</th><th>访问</th><th>占比</th><th>先验</th><th>胜率</th></tr>
+            </thead>
+            <tbody id="candBody"></tbody>
+          </table>
+        </section>
+
+        <section class="panel history">
+          <div class="panel-title">
+            <span>棋谱</span>
+            <strong id="historyCount">0</strong>
+          </div>
+          <ol id="historyList"></ol>
+        </section>
+      </aside>
+    </main>
+
+    <div class="toast" id="toast" hidden></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

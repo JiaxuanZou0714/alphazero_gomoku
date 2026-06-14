@@ -1,0 +1,29 @@
+{
+  "format": "onnx",
+  "model": "gomoku10_best.onnx",
+  "storage": "chunks",
+  "bytes": 37777232,
+  "sha256": "895ffafbda2802f45e344be974989a8b263ba6115670493ba5ff0a5ee8142c04",
+  "chunkSize": 25165824,
+  "chunks": [
+    {
+      "file": "gomoku10_best.onnx.part00",
+      "bytes": 25165824,
+      "sha256": "595280968c3fd672ba0fc7ca0318dab21c7f22396a7a58a9005cf869fc662b1b"
+    },
+    {
+      "file": "gomoku10_best.onnx.part01",
+      "bytes": 12611408,
+      "sha256": "4c090f694b1d8b73ab0931a421b919669a2577c0020b1879e4360fa7ba14f7c7"
+    }
+  ],
+  "config": {
+    "board_size": 10,
+    "win_length": 5,
+    "mcts_batch_size": 48,
+    "mcts_c_puct": 1.25,
+    "mcts_root_policy_temp": 1.1,
+    "mcts_dynamic_cpuct": true,
+    "mcts_fpu_reduction": 0.2
+  }
+}

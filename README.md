@@ -291,3 +291,21 @@ python -m unittest discover -s alphazero_gomoku/tests -t .
 ```
 
 覆盖内容：五子棋规则与终局判定、MCTS 必胜局面与根节点估值符号、策略目标剪枝、树复用、随机对称增强的状态-策略一致性、训练循环边界条件、replay v2 格式与旧格式兼容加载。
+
+## GitHub Pages 静态版
+
+`docs/` 目录是无需后端服务器的静态对弈版本，适合直接部署到 GitHub Pages。它把当前最佳 checkpoint 导出为 ONNX，并在浏览器里用 ONNX Runtime Web 执行神经网络和 MCTS。
+
+本地重新导出模型：
+
+```powershell
+conda run -n alphazero-gomoku python scripts\export_pages_model.py --checkpoint outputs\checkpoints\a100-4-prod-v3\gomoku10_best.pt --out-dir docs\assets\model --chunk-mib 24
+```
+
+本地预览静态版：
+
+```powershell
+conda run -n alphazero-gomoku python -m http.server 8780 --bind 127.0.0.1 --directory docs
+```
+
+然后打开 <http://127.0.0.1:8780/>。部署到 GitHub Pages 时，在仓库 Settings -> Pages 里选择从分支发布，并把目录设为 `/docs`。静态版会从 `docs/assets/model/manifest.json` 读取模型分片，不需要 `web_play.py`、Python 服务或 GPU 后端。
