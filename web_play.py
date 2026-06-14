@@ -32,7 +32,7 @@ class GameSession:
             size=int(cfg.get("board_size", 10)),
             win_length=int(cfg.get("win_length", 5)),
         )
-        self.human_player = 1
+        self.human_player = -1
         self.simulations = simulations
         self.history: list[dict] = []
         self.last_analysis: dict = {}
@@ -75,12 +75,12 @@ class GameSession:
             self.simulations = simulations
             self._mcts = self._make_mcts(simulations)
 
-    def new_game(self, human: str = "black", simulations: int | None = None) -> dict:
+    def new_game(self, human: str = "white", simulations: int | None = None) -> dict:
         self.state = GomokuState.new(
             size=int(self.cfg.get("board_size", 10)),
             win_length=int(self.cfg.get("win_length", 5)),
         )
-        self.human_player = 1 if human == "black" else -1
+        self.human_player = -1
         self.set_simulations(int(simulations or self.default_simulations))
         self.history = []
         self.last_analysis = {}
@@ -300,7 +300,7 @@ class WebPlayHandler(BaseHTTPRequestHandler):
             with self.session.lock:
                 if parsed.path == "/api/new":
                     result = self.session.new_game(
-                        human=str(body.get("human", "black")),
+                        human=str(body.get("human", "white")),
                         simulations=int(body.get("simulations", self.session.default_simulations)),
                     )
                 elif parsed.path == "/api/move":

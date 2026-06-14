@@ -38,7 +38,7 @@ const sideButtons = [...document.querySelectorAll(".segment[data-side]")];
 const overlayButtons = [...document.querySelectorAll(".segment[data-overlay]")];
 
 let state = null;
-let selectedSide = "black";
+const HUMAN_SIDE = "white";
 let overlayMode = "none";
 let busy = true;
 let cells = [];
@@ -554,7 +554,7 @@ function render(nextState) {
 
   simValue.textContent = state.simulations;
   simSlider.value = Math.min(Math.max(state.simulations, simSlider.min), simSlider.max);
-  sideLabel.textContent = state.humanPlayer === 1 ? "执黑" : "执白";
+  sideLabel.textContent = "执白";
   statusPill.textContent = state.status;
   statusPill.className = `status-pill ${state.winner !== null ? "done" : ""}`;
   undoBtn.disabled = !state.canUndo || busy;
@@ -564,7 +564,7 @@ async function newGame() {
   try {
     setBusy(true, "新对局");
     render(await callWorker("newGame", {
-      human: selectedSide,
+      human: HUMAN_SIDE,
       simulations: Number(simSlider.value),
     }));
   } catch (error) {
@@ -628,9 +628,8 @@ function setOverlay(mode) {
 
 sideButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    selectedSide = button.dataset.side;
     sideButtons.forEach((item) => item.classList.toggle("active", item === button));
-    sideLabel.textContent = selectedSide === "black" ? "执黑" : "执白";
+    sideLabel.textContent = "执白";
   });
 });
 

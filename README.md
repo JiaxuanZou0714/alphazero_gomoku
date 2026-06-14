@@ -206,10 +206,10 @@ cd /Users/jiaxuanzou/Documents
 python -m alphazero_gomoku.play \
   alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt \
   --simulations 256 \
-  --human black
+  --human white
 ```
 
-行列坐标均从 `1` 开始。
+人类固定执白后手，AI 执黑先行。行列坐标均从 `1` 开始。
 
 ## 本地网页对弈
 

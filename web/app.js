@@ -28,7 +28,7 @@ const sideButtons = [...document.querySelectorAll(".segment[data-side]")];
 const overlayButtons = [...document.querySelectorAll(".segment[data-overlay]")];
 
 let state = null;
-let selectedSide = "black";
+const HUMAN_SIDE = "white";
 let overlayMode = "none";
 let busy = false;
 let cells = [];
@@ -325,7 +325,7 @@ function render(nextState) {
 
   simValue.textContent = state.simulations;
   simSlider.value = Math.min(Math.max(state.simulations, simSlider.min), simSlider.max);
-  sideLabel.textContent = state.humanPlayer === 1 ? "执黑" : "执白";
+  sideLabel.textContent = "执白";
   statusPill.textContent = state.status
     .replace("Your turn", "轮到你")
     .replace("AI turn", "AI 行棋")
@@ -348,7 +348,7 @@ async function newGame() {
     setBusy(true);
     render(await request("/api/new", {
       method: "POST",
-      body: JSON.stringify({ human: selectedSide, simulations: Number(simSlider.value) }),
+      body: JSON.stringify({ human: HUMAN_SIDE, simulations: Number(simSlider.value) }),
     }));
   } catch (error) { showToast(error.message); }
   finally { setBusy(false); render(state); }
@@ -397,9 +397,8 @@ function setOverlay(mode) {
 
 sideButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    selectedSide = button.dataset.side;
     sideButtons.forEach((item) => item.classList.toggle("active", item === button));
-    sideLabel.textContent = selectedSide === "black" ? "执黑" : "执白";
+    sideLabel.textContent = "执白";
   });
 });
 

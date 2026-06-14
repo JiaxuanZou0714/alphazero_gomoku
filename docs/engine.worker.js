@@ -500,15 +500,15 @@ class GameSession {
     this.config = config;
     this.defaultSimulations = 256;
     this.mcts = new BrowserMCTS(config);
-    this.newGame("black", this.defaultSimulations);
+    this.newGame("white", this.defaultSimulations);
   }
 
-  newGame(human = "black", simulations = this.defaultSimulations) {
+  newGame(human = "white", simulations = this.defaultSimulations) {
     this.state = GomokuState.new(
       Number(this.config.board_size ?? 10),
       Number(this.config.win_length ?? 5),
     );
-    this.humanPlayer = human === "black" ? 1 : -1;
+    this.humanPlayer = -1;
     this.simulations = Math.max(1, Number(simulations));
     this.history = [];
     this.lastAnalysis = {};

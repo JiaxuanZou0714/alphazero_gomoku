@@ -24,7 +24,7 @@ def main() -> None:
     parser.add_argument("checkpoint", type=Path)
     parser.add_argument("--simulations", type=int, default=128)
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--human", choices=["black", "white"], default="black")
+    parser.add_argument("--human", choices=["white"], default="white")
     args = parser.parse_args()
     args.device = resolve_device(args.device)
 
@@ -32,7 +32,7 @@ def main() -> None:
     state = GomokuState.new(
         size=int(cfg.get("board_size", 10)), win_length=int(cfg.get("win_length", 5))
     )
-    human_player = 1 if args.human == "black" else -1
+    human_player = -1
     mcts = MCTS(
         model,
         MCTSConfig(
