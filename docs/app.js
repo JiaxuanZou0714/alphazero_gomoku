@@ -30,6 +30,10 @@ const chartCanvas = document.querySelector("#evalChart");
 const loadLine = document.querySelector("#loadLine");
 const loadBar = document.querySelector("#loadBar");
 const loadText = document.querySelector("#loadText");
+const loadPercent = document.querySelector("#loadPercent");
+const computeOverlay = document.querySelector("#computeOverlay");
+const computeTitle = document.querySelector("#computeTitle");
+const computeDetail = document.querySelector("#computeDetail");
 const sideButtons = [...document.querySelectorAll(".segment[data-side]")];
 const overlayButtons = [...document.querySelectorAll(".segment[data-overlay]")];
 
@@ -55,6 +59,49 @@ function showToast(message) {
   }, 3200);
 }
 
+function busyCopy(label) {
+  if (label.includes("加载")) {
+    return {
+      title: "加载模型",
+      detail: "正在初始化浏览器推理后端",
+      tone: "loading",
+    };
+  }
+  if (label.includes("提示")) {
+    return {
+      title: "生成提示",
+      detail: "MCTS 正在重新评估当前局面",
+      tone: "thinking",
+    };
+  }
+  if (label.includes("思考")) {
+    return {
+      title: "AI 思考中",
+      detail: "搜索候选点并回传胜率评估",
+      tone: "thinking",
+    };
+  }
+  if (label.includes("新对局")) {
+    return {
+      title: "准备新对局",
+      detail: "重置棋盘、胜率和搜索树",
+      tone: "loading",
+    };
+  }
+  if (label.includes("悔棋")) {
+    return {
+      title: "回退局面",
+      detail: "恢复上一手棋和分析状态",
+      tone: "loading",
+    };
+  }
+  return {
+    title: label || "处理中",
+    detail: "正在更新局面",
+    tone: "thinking",
+  };
+}
+
 function setBusy(nextBusy, label = "") {
   busy = nextBusy;
   [newGameBtn, undoBtn, analyzeBtn, simSlider, ...sideButtons].forEach((el) => {
@@ -62,9 +109,17 @@ function setBusy(nextBusy, label = "") {
   });
   boardEl.classList.toggle("busy", busy);
   boardEl.setAttribute("aria-busy", String(busy));
+  computeOverlay.hidden = !busy;
+  computeOverlay.setAttribute("aria-hidden", String(!busy));
   if (busy) {
-    statusPill.textContent = label || "AI 思考中";
-    statusPill.className = "status-pill thinking";
+    const copy = busyCopy(label);
+    computeTitle.textContent = copy.title;
+    computeDetail.textContent = copy.detail;
+    computeOverlay.dataset.tone = copy.tone;
+    statusPill.textContent = label || copy.title;
+    statusPill.className = `status-pill ${copy.tone}`;
+  } else {
+    delete computeOverlay.dataset.tone;
   }
 }
 
@@ -80,7 +135,9 @@ worker.addEventListener("message", (event) => {
   const msg = event.data;
   if (msg.type === "progress") {
     const pctValue = msg.payload.total ? msg.payload.loaded / msg.payload.total : 0;
-    loadBar.style.width = `${Math.max(2, Math.min(100, pctValue * 100)).toFixed(1)}%`;
+    const percent = Math.max(0, Math.min(100, pctValue * 100));
+    loadBar.style.width = `${Math.max(2, percent).toFixed(1)}%`;
+    loadPercent.textContent = `${Math.round(percent)}%`;
     loadText.textContent = msg.payload.label;
     return;
   }
@@ -598,6 +655,9 @@ async function boot() {
   try {
     setBusy(true, "加载模型");
     await callWorker("init");
+    loadBar.style.width = "100%";
+    loadPercent.textContent = "100%";
+    loadText.textContent = "模型就绪";
     loadLine.classList.add("ready");
     setBusy(false);
     await newGame();

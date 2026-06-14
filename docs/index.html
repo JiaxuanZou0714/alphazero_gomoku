@@ -18,8 +18,15 @@
         </div>
 
         <div class="load-line" id="loadLine" aria-live="polite">
+          <div class="activity-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="load-copy">
+            <strong>模型加载</strong>
+            <span id="loadText">准备加载</span>
+          </div>
+          <strong class="load-percent" id="loadPercent">0%</strong>
           <div class="load-bar"><span id="loadBar"></span></div>
-          <span id="loadText">准备加载</span>
         </div>
 
         <div class="board-area">
@@ -31,7 +38,20 @@
             <div class="coordinates columns" id="colCoords"></div>
             <div class="board-row">
               <div class="coordinates rows" id="rowCoords"></div>
-              <div class="board" id="board" aria-label="棋盘" role="grid"></div>
+              <div class="board-stage">
+                <div class="board" id="board" aria-label="棋盘" role="grid"></div>
+                <div class="compute-overlay" id="computeOverlay" aria-live="polite" hidden>
+                  <div class="compute-card">
+                    <div class="compute-mark" aria-hidden="true">
+                      <span></span><span></span><span></span>
+                    </div>
+                    <div class="compute-copy">
+                      <strong id="computeTitle">AI 思考中</strong>
+                      <span id="computeDetail">MCTS 正在扩展搜索树</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
