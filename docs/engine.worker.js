@@ -405,6 +405,8 @@ function searchAnalysis(root, state, elapsedMs) {
     node = child;
   }
 
+  const tree = buildSearchTree(root, state);
+
   return {
     action: bestAction,
     analysis: {
@@ -419,8 +421,75 @@ function searchAnalysis(root, state, elapsedMs) {
       qMap,
       candidates,
       pv,
+      tree,
     },
   };
+}
+
+function buildSearchTree(root, state) {
+  const nodes = [];
+  const edges = [];
+  const maxDepth = 2;
+  const childLimit = [5, 2];
+  const rootVisits = Math.max(1, root.visitCount);
+
+  function addNode(
+    node,
+    nodeState,
+    depth,
+    parentId = null,
+    action = null,
+    mover = null,
+    branchShare = 1,
+    rank = 0,
+    principal = true,
+  ) {
+    const id = nodes.length;
+    const isRoot = parentId === null;
+    const q = isRoot ? node.value : (node.visitCount > 0 ? -node.value : null);
+    const row = action === null ? null : Math.floor(action / nodeState.size);
+    const col = action === null ? null : action % nodeState.size;
+    nodes.push({
+      id,
+      parentId,
+      depth,
+      row,
+      col,
+      mover,
+      visits: node.visitCount,
+      share: node.visitCount / rootVisits,
+      branchShare,
+      rank,
+      principal,
+      prior: node.rawPrior,
+      winProb: q === null ? null : (q + 1) / 2,
+    });
+    if (parentId !== null) edges.push({ from: parentId, to: id, share: branchShare, rank, principal });
+
+    if (depth >= maxDepth || !node.expanded) return id;
+    const children = [...node.children.entries()]
+      .filter(([, child]) => child.visitCount > 0)
+      .sort((a, b) => b[1].visitCount - a[1].visitCount)
+      .slice(0, childLimit[depth] ?? 3);
+    const total = children.reduce((sum, [, child]) => sum + child.visitCount, 0) || 1;
+    children.forEach(([childAction, child], index) => {
+      addNode(
+        child,
+        nodeState.apply(childAction),
+        depth + 1,
+        id,
+        childAction,
+        nodeState.currentPlayer,
+        child.visitCount / total,
+        index,
+        principal && index === 0,
+      );
+    });
+    return id;
+  }
+
+  addNode(root, state, 0);
+  return { nodes, edges };
 }
 
 class GameSession {

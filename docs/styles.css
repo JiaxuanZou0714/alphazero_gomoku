@@ -467,9 +467,10 @@ h1 {
   position: sticky;
   top: 18px;
   display: grid;
-  grid-template-rows: auto auto minmax(150px, 0.85fr) minmax(160px, 1fr);
+  grid-template-rows: auto;
+  grid-auto-rows: auto;
   gap: 12px;
-  max-height: calc(100vh - 36px);
+  max-height: none;
   min-height: 0;
 }
 
@@ -701,6 +702,99 @@ tr.best td {
 .history {
   min-height: 0;
   overflow: auto;
+}
+
+.tree-panel {
+  overflow: hidden;
+}
+
+.tree-panel .source {
+  margin-bottom: 12px;
+}
+
+.tree-svg {
+  display: block;
+  width: 100%;
+  height: 220px;
+  overflow: hidden;
+  border: 1px solid rgba(211, 218, 203, 0.7);
+  border-radius: 8px;
+  background:
+    linear-gradient(rgba(111, 120, 109, 0.08) 1px, transparent 1px) 0 0 / 100% 55px,
+    linear-gradient(180deg, rgba(255, 254, 250, 0.96), rgba(240, 245, 237, 0.9));
+}
+
+.tree-edge {
+  fill: none;
+  stroke: rgba(27, 122, 115, 0.4);
+  stroke-linecap: round;
+  transition:
+    stroke 160ms ease,
+    opacity 160ms ease,
+    stroke-width 160ms ease;
+}
+
+.tree-edge.strong {
+  stroke: rgba(27, 122, 115, 0.54);
+}
+
+.tree-edge.best {
+  stroke: rgba(194, 75, 51, 0.74);
+}
+
+.tree-node circle {
+  stroke-width: 2;
+  transition: r 180ms ease;
+}
+
+.tree-node.root circle {
+  fill: var(--accent-2);
+  stroke: rgba(255, 254, 250, 0.95);
+}
+
+.tree-node.black circle {
+  fill: #151613;
+  stroke: rgba(255, 254, 250, 0.92);
+  filter: drop-shadow(0 4px 8px rgba(20, 20, 18, 0.22));
+}
+
+.tree-node.white circle {
+  fill: #fffdf7;
+  stroke: rgba(32, 35, 31, 0.38);
+  filter: drop-shadow(0 4px 8px rgba(20, 20, 18, 0.14));
+}
+
+.tree-node.best circle {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.tree-node.depth-2 circle {
+  opacity: 0.88;
+}
+
+.tree-node text,
+.tree-empty {
+  fill: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  paint-order: stroke;
+  stroke: rgba(255, 254, 250, 0.8);
+  stroke-width: 3px;
+}
+
+.tree-node.root text {
+  fill: var(--accent-2);
+  font-size: 11px;
+}
+
+.tree-node.depth-1 text {
+  fill: var(--ink);
+  font-size: 11px;
+}
+
+.tree-node.depth-2 text {
+  display: none;
 }
 
 .candidates table {

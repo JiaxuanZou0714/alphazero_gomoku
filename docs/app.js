@@ -11,6 +11,8 @@ const historyList = document.querySelector("#historyList");
 const historyCount = document.querySelector("#historyCount");
 const candBody = document.querySelector("#candBody");
 const policyCount = document.querySelector("#policyCount");
+const treeSvg = document.querySelector("#treeSvg");
+const treeCount = document.querySelector("#treeCount");
 const toast = document.querySelector("#toast");
 const newGameBtn = document.querySelector("#newGame");
 const undoBtn = document.querySelector("#undo");
@@ -249,6 +251,114 @@ function renderCandidates() {
   });
 }
 
+function svgEl(name, attrs = {}) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", name);
+  Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, String(value)));
+  return el;
+}
+
+function renderTree() {
+  treeSvg.innerHTML = "";
+  const tree = state.analysis && state.analysis.tree;
+  const nodes = tree && tree.nodes ? tree.nodes : [];
+  const edges = tree && tree.edges ? tree.edges : [];
+  treeCount.textContent = Math.max(0, nodes.length - 1);
+
+  if (!nodes.length) {
+    const text = svgEl("text", {
+      x: 160,
+      y: 92,
+      class: "tree-empty",
+      "text-anchor": "middle",
+    });
+    text.textContent = "落子或点击分析后显示搜索树";
+    treeSvg.appendChild(text);
+    return;
+  }
+
+  const width = 320;
+  const byDepth = new Map();
+  nodes.forEach((node) => {
+    if (!byDepth.has(node.depth)) byDepth.set(node.depth, []);
+    byDepth.get(node.depth).push(node);
+  });
+
+  const positions = new Map();
+  const root = nodes.find((node) => node.depth === 0);
+  if (root) positions.set(root.id, { x: width / 2, y: 28 });
+  const first = byDepth.get(1) || [];
+  first.forEach((node, index) => {
+    const x = 36 + ((index + 1) / (first.length + 1)) * (width - 72);
+    positions.set(node.id, { x, y: 100 });
+  });
+  const second = byDepth.get(2) || [];
+  const byParent = new Map();
+  second.forEach((node) => {
+    if (!byParent.has(node.parentId)) byParent.set(node.parentId, []);
+    byParent.get(node.parentId).push(node);
+  });
+  for (const [parentId, group] of byParent.entries()) {
+    const parent = positions.get(parentId);
+    if (!parent) continue;
+    group.forEach((node, index) => {
+      const spread = group.length === 1 ? 0 : (index - (group.length - 1) / 2) * 22;
+      positions.set(node.id, {
+        x: Math.max(18, Math.min(width - 18, parent.x + spread)),
+        y: 168,
+      });
+    });
+  }
+
+  const edgeLayer = svgEl("g", { class: "tree-edges" });
+  edges.forEach((edge) => {
+    const a = positions.get(edge.from);
+    const b = positions.get(edge.to);
+    if (!a || !b) return;
+    edgeLayer.appendChild(svgEl("path", {
+      d: `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} C ${a.x.toFixed(1)} ${(a.y + b.y) / 2}, ${b.x.toFixed(1)} ${(a.y + b.y) / 2}, ${b.x.toFixed(1)} ${b.y.toFixed(1)}`,
+      class: `tree-edge ${edge.principal ? "best" : edge.share > 0.45 ? "strong" : ""}`,
+      opacity: (0.34 + Math.min(0.58, edge.share * 0.72)).toFixed(2),
+      "stroke-width": (0.9 + Math.sqrt(Math.max(0.02, edge.share)) * 4.2).toFixed(2),
+    }));
+  });
+  treeSvg.appendChild(edgeLayer);
+
+  const nodeLayer = svgEl("g", { class: "tree-nodes" });
+  nodes.forEach((node) => {
+    const p = positions.get(node.id);
+    if (!p) return;
+    const isRoot = node.depth === 0;
+    const r = isRoot ? 10 : node.depth === 1
+      ? 5 + Math.sqrt(Math.max(0.01, node.share)) * 18
+      : 4 + Math.sqrt(Math.max(0.01, node.branchShare || node.share)) * 7;
+    const group = svgEl("g", {
+      class: `tree-node depth-${node.depth} ${isRoot ? "root" : node.mover === 1 ? "black" : "white"} ${node.principal && !isRoot ? "best" : ""}`,
+    });
+    const circle = svgEl("circle", {
+      cx: p.x.toFixed(1),
+      cy: p.y.toFixed(1),
+      r: Math.min(node.depth === 2 ? 8 : 18, r).toFixed(1),
+    });
+    const title = svgEl("title");
+    const move = isRoot ? "当前局面" : `${node.mover === 1 ? "黑" : "白"} ${node.row + 1},${node.col + 1}`;
+    const win = node.winProb === null ? "-" : pct(node.winProb);
+    title.textContent = `${move} · 模拟 ${node.visits} · 分支 ${pct(node.branchShare || 0)} · 当前方胜率 ${win}`;
+    circle.appendChild(title);
+    group.appendChild(circle);
+
+    const label = svgEl("text", {
+      x: p.x.toFixed(1),
+      y: (p.y + Math.min(node.depth === 2 ? 8 : 18, r) + 13).toFixed(1),
+      class: `tree-label depth-${node.depth}`,
+      "text-anchor": "middle",
+    });
+    label.textContent = isRoot ? "当前" : `${node.row + 1},${node.col + 1}`;
+    group.appendChild(label);
+    nodeLayer.appendChild(group);
+  });
+  treeSvg.appendChild(nodeLayer);
+}
+
 function renderHistory() {
   historyCount.textContent = state.movesPlayed;
   historyList.innerHTML = "";
@@ -326,6 +436,7 @@ function render(nextState) {
   renderBoard();
   renderEval();
   renderCandidates();
+  renderTree();
   renderHistory();
   renderChart();
 

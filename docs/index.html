@@ -99,6 +99,15 @@
           <canvas id="evalChart" height="120"></canvas>
         </section>
 
+        <section class="panel tree-panel">
+          <div class="panel-title">
+            <span>MCTS 搜索树</span>
+            <strong id="treeCount">0</strong>
+          </div>
+          <p class="source">只显示访问最多的主干分支。节点越大=模拟越多，线越粗=这条路线被继续展开得越多。</p>
+          <svg id="treeSvg" class="tree-svg" viewBox="0 0 320 220" role="img" aria-label="MCTS 搜索树"></svg>
+        </section>
+
         <section class="panel candidates">
           <div class="panel-title">
             <span>候选点</span>
