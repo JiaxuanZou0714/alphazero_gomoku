@@ -14,10 +14,10 @@
             <p class="eyebrow">10x10 Gomoku · Browser AlphaZero</p>
             <h1>AlphaZero 五子棋</h1>
           </div>
-          <div class="status-pill loading" id="statusPill">加载模型</div>
+          <div class="status-pill loading" id="statusPill" role="status" aria-live="polite">加载模型</div>
         </div>
 
-        <div class="load-line" id="loadLine">
+        <div class="load-line" id="loadLine" aria-live="polite">
           <div class="load-bar"><span id="loadBar"></span></div>
           <span id="loadText">准备加载</span>
         </div>
@@ -44,13 +44,13 @@
               <button class="segment" data-overlay="prior" type="button">直觉</button>
             </div>
             <p class="overlay-help">
-              直觉是模型第一眼想下哪；深算是 MCTS 模拟很多后续之后真正重点比较的点。
+              深算=搜索后重点关注；直觉=模型第一眼判断。
             </p>
           </div>
           <label class="pv-toggle">
             <input id="pvToggle" type="checkbox" checked />
-            <span>PV</span>
-            <small>AI 预计的后续路线</small>
+            <span>后续路线</span>
+            <small>数字表示预测第几步</small>
           </label>
         </div>
 
@@ -59,7 +59,11 @@
             <span>MCTS 搜索树</span>
             <strong id="treeCount">0</strong>
           </div>
-          <p class="source">红线是 AI 继续深挖的主线；横向分支是候选，底部小点是被模拟过的后续局面。</p>
+          <div class="tree-legend" aria-label="MCTS 图例">
+            <span><i class="legend-line main"></i>主线</span>
+            <span><i class="legend-line branch"></i>候选分支</span>
+            <span><i class="legend-dot"></i>模拟局面</span>
+          </div>
           <svg id="treeSvg" class="tree-svg" viewBox="0 0 760 320" role="img" aria-label="MCTS 搜索树"></svg>
         </section>
       </section>
@@ -132,7 +136,7 @@
       </aside>
     </main>
 
-    <div class="toast" id="toast" hidden></div>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

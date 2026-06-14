@@ -61,6 +61,7 @@ function setBusy(nextBusy, label = "") {
     el.disabled = busy;
   });
   boardEl.classList.toggle("busy", busy);
+  boardEl.setAttribute("aria-busy", String(busy));
   if (busy) {
     statusPill.textContent = label || "AI 思考中";
     statusPill.className = "status-pill thinking";
@@ -263,6 +264,9 @@ function renderTree() {
   const nodes = tree && tree.nodes ? tree.nodes : [];
   const edges = tree && tree.edges ? tree.edges : [];
   treeCount.textContent = Math.max(0, nodes.length - 1);
+  treeSvg.setAttribute("aria-label", nodes.length
+    ? `MCTS 搜索树，显示 ${Math.max(0, nodes.length - 1)} 个已展开节点`
+    : "MCTS 搜索树，尚无搜索数据");
 
   if (!nodes.length) {
     const text = svgEl("text", {
@@ -271,7 +275,7 @@ function renderTree() {
       class: "tree-empty",
       "text-anchor": "middle",
     });
-    text.textContent = "落子或点击提示后显示搜索树";
+    text.textContent = "点击提示后显示搜索树";
     treeSvg.appendChild(text);
     return;
   }

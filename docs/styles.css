@@ -46,7 +46,8 @@ input {
 }
 
 button {
-  min-height: 42px;
+  min-width: 0;
+  min-height: 44px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: var(--ink);
@@ -74,6 +75,13 @@ button:active:not(:disabled) {
 button:disabled {
   cursor: wait;
   opacity: 0.5;
+}
+
+button:focus-visible,
+input:focus-visible,
+.cell:focus-visible {
+  outline: 3px solid rgba(27, 122, 115, 0.45);
+  outline-offset: 3px;
 }
 
 .app-shell {
@@ -122,6 +130,7 @@ h1 {
   font-size: clamp(32px, 3.2vw, 52px);
   line-height: 0.95;
   letter-spacing: 0;
+  text-wrap: balance;
 }
 
 .status-pill {
@@ -435,9 +444,10 @@ h1 {
 
 .pv-toggle {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
+  min-height: 44px;
   color: var(--muted);
   font-weight: 800;
 }
@@ -455,6 +465,7 @@ h1 {
   font-size: 12px;
   line-height: 1.45;
   text-align: left;
+  text-wrap: pretty;
 }
 
 .pv-toggle input {
@@ -503,14 +514,18 @@ h1 {
 }
 
 .panel-title span {
+  min-width: 0;
   color: var(--muted);
   font-size: 13px;
   font-weight: 720;
+  overflow-wrap: anywhere;
 }
 
 .panel-title strong {
+  min-width: 0;
   font-size: 17px;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .slider-row {
@@ -626,6 +641,7 @@ dd {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+  text-wrap: pretty;
 }
 
 canvas {
@@ -639,6 +655,7 @@ canvas {
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -648,6 +665,7 @@ td {
   border-bottom: 1px solid rgba(211, 218, 203, 0.88);
   padding: 8px 4px;
   text-align: right;
+  overflow-wrap: anywhere;
 }
 
 tbody tr:hover td {
@@ -710,8 +728,46 @@ tr.best td {
   overflow: hidden;
 }
 
-.tree-panel .source {
-  margin-bottom: 12px;
+.tree-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: -2px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.tree-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.legend-line {
+  display: inline-block;
+  width: 24px;
+  height: 3px;
+  border-radius: 999px;
+}
+
+.legend-line.main {
+  background: #e2846f;
+}
+
+.legend-line.branch {
+  background: #7acabc;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid rgba(32, 35, 31, 0.35);
 }
 
 .tree-svg {
@@ -853,6 +909,15 @@ tr.best td {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
   .tree-edge.best,
   .tree-pulse {
     animation: none;
@@ -976,5 +1041,9 @@ li {
 
   .tree-svg {
     height: 260px;
+  }
+
+  .segment {
+    min-height: 44px;
   }
 }
