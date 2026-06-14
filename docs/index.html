@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AlphaZero 五子棋</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f6f7f5'/%3E%3Ccircle cx='16' cy='16' r='9' fill='%2320231f'/%3E%3Ccircle cx='19' cy='13' r='3' fill='%23ffffff' fill-opacity='.24'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -39,7 +40,7 @@
             <div class="board-row">
               <div class="coordinates rows" id="rowCoords"></div>
               <div class="board-stage">
-                <div class="board" id="board" aria-label="棋盘" role="grid"></div>
+                <div class="board" id="board" aria-label="棋盘"></div>
                 <div class="compute-overlay" id="computeOverlay" aria-live="polite" hidden>
                   <div class="compute-card">
                     <div class="compute-mark" aria-hidden="true">
@@ -64,10 +65,17 @@
             <span>对局设置</span>
             <strong id="sideLabel">执白</strong>
           </div>
-          <div class="segmented" role="group" aria-label="执棋">
-            <button class="segment" data-side="black" type="button">我执黑（先手）</button>
-            <button class="segment active" data-side="white" type="button">我执白（后手）</button>
-          </div>
+          <fieldset class="segmented" aria-label="执棋">
+            <legend class="sr-only">执棋</legend>
+            <label class="segment">
+              <input type="radio" name="side" value="black" />
+              <span>我执黑（先手）</span>
+            </label>
+            <label class="segment">
+              <input type="radio" name="side" value="white" checked />
+              <span>我执白（后手）</span>
+            </label>
+          </fieldset>
 
           <label class="slider-row">
             <span>深算次数</span>
@@ -115,7 +123,6 @@
             <div><dt>耗时</dt><dd id="statTime">-</dd></div>
           </dl>
           <p class="source" id="evalSource">-</p>
-          <canvas id="evalChart" height="120"></canvas>
         </section>
 
         <section class="panel history">
@@ -129,13 +136,31 @@
 
       <details class="analysis-details">
         <summary>分析详情</summary>
+        <section class="panel network-panel">
+          <div class="panel-title">
+            <span>CNN 结构</span>
+          </div>
+          <div class="network-diagram" id="networkDiagram">网络结构图加载中</div>
+          <p class="network-copy">使用 Mermaid 自动布局。当前 ONNX：27 个卷积算子，输出落点 logits 和局面 value。</p>
+        </section>
+
         <div class="overlay-controls">
           <div class="overlay-toolbox">
-            <div class="segmented overlay-seg" role="group" aria-label="叠加层">
-              <button class="segment active" data-overlay="none" type="button">棋盘</button>
-              <button class="segment" data-overlay="search" type="button">深算</button>
-              <button class="segment" data-overlay="policy" type="button">倾向</button>
-            </div>
+            <fieldset class="segmented overlay-seg" aria-label="叠加层">
+              <legend class="sr-only">叠加层</legend>
+              <label class="segment">
+                <input type="radio" name="overlay" value="none" checked />
+                <span>棋盘</span>
+              </label>
+              <label class="segment">
+                <input type="radio" name="overlay" value="search" />
+                <span>深算</span>
+              </label>
+              <label class="segment">
+                <input type="radio" name="overlay" value="policy" />
+                <span>倾向</span>
+              </label>
+            </fieldset>
             <p class="overlay-help">深算=搜索后重点看的点；倾向=模型第一眼的落点概率。</p>
           </div>
           <label class="pv-toggle">
@@ -145,20 +170,6 @@
           </label>
         </div>
         <div class="analysis-detail-grid">
-          <section class="panel candidates">
-            <div class="panel-title">
-              <span id="candidateTitle">候选点</span>
-              <strong id="policyCount">0</strong>
-            </div>
-            <p class="source" id="overlayNote">点“提示”后显示候选。</p>
-            <table>
-              <thead>
-                <tr><th>点位</th><th>模拟</th><th>占比</th><th>倾向</th><th>胜率</th></tr>
-              </thead>
-              <tbody id="candBody"></tbody>
-            </table>
-          </section>
-
           <section class="panel tree-panel">
             <div class="panel-title">
               <span id="treeTitle">MCTS 树</span>
@@ -171,7 +182,21 @@
               <span><i class="legend-dot"></i>节点</span>
               <strong id="treeDepth">等待建议</strong>
             </div>
-            <svg id="treeSvg" class="tree-svg" viewBox="0 0 840 380" role="img" aria-label="MCTS 搜索树"></svg>
+            <svg id="treeSvg" class="tree-svg" viewBox="0 0 920 460" role="img" aria-label="MCTS 搜索树"></svg>
+          </section>
+
+          <section class="panel candidates">
+            <div class="panel-title">
+              <span id="candidateTitle">候选点</span>
+              <strong id="policyCount">0</strong>
+            </div>
+            <p class="source" id="overlayNote">点“提示”后显示候选。</p>
+            <table>
+              <thead>
+                <tr><th>点位</th><th>模拟</th><th>占比</th><th>倾向</th><th>胜率</th></tr>
+              </thead>
+              <tbody id="candBody"></tbody>
+            </table>
           </section>
         </div>
       </details>

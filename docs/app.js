@@ -21,6 +21,7 @@ const toast = document.querySelector("#toast");
 const newGameBtn = document.querySelector("#newGame");
 const undoBtn = document.querySelector("#undo");
 const analyzeBtn = document.querySelector("#analyze");
+const networkDiagram = document.querySelector("#networkDiagram");
 const pvToggle = document.querySelector("#pvToggle");
 const overlayNote = document.querySelector("#overlayNote");
 const evalBlack = document.querySelector("#evalBlack");
@@ -30,7 +31,6 @@ const winProbEl = document.querySelector("#winProb");
 const evalSource = document.querySelector("#evalSource");
 const statSims = document.querySelector("#statSims");
 const statTime = document.querySelector("#statTime");
-const chartCanvas = document.querySelector("#evalChart");
 const loadLine = document.querySelector("#loadLine");
 const loadBar = document.querySelector("#loadBar");
 const loadText = document.querySelector("#loadText");
@@ -45,8 +45,9 @@ const recSearch = document.querySelector("#recSearch");
 const recPolicy = document.querySelector("#recPolicy");
 const recWin = document.querySelector("#recWin");
 const recommendationWhy = document.querySelector("#recommendationWhy");
-const sideButtons = [...document.querySelectorAll(".segment[data-side]")];
-const overlayButtons = [...document.querySelectorAll(".segment[data-overlay]")];
+const analysisDetails = document.querySelector(".analysis-details");
+const sideInputs = [...document.querySelectorAll("input[name='side']")];
+const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 
 let state = null;
 let selectedSide = "white";
@@ -54,11 +55,29 @@ let overlayMode = "none";
 let busy = true;
 let cells = [];
 let requestId = 0;
+let d3Tree = null;
+let d3TreeError = false;
+let d3TreePromise = null;
+let mermaidReady = false;
+let mermaidError = false;
+let mermaidPromise = null;
 const pending = new Map();
 
 const worker = new Worker("./engine.worker.js");
 
 const SIMULATION_OPTIONS = [16, 32, 64, 128, 256, 512];
+const NETWORK_DIAGRAM = String.raw`
+flowchart LR
+  input["棋盘输入<br/>2×10×10"]
+  stem["3×3 卷积<br/>192 通道"]
+  tower["12× 残差块<br/>Conv + skip"]
+  policy["策略头<br/>100 个落点"]
+  value["价值头<br/>1 个胜率"]
+  mcts["MCTS<br/>反复调用"]
+  input --> stem --> tower
+  tower --> policy --> mcts
+  tower --> value --> mcts
+`;
 const playerName = (v) => (v === 1 ? "黑" : v === -1 ? "白" : "-");
 const pct = (v, digits = 0) => `${(v * 100).toFixed(digits)}%`;
 const moveText = (move) => (move ? `${move.row + 1},${move.col + 1}` : "-");
@@ -86,8 +105,8 @@ function syncSimulationDisplay(value = selectedSimulations()) {
 }
 
 function syncOverlayButtons() {
-  overlayButtons.forEach((button) => {
-    button.classList.toggle("active", button.dataset.overlay === overlayMode);
+  overlayInputs.forEach((input) => {
+    input.checked = input.value === overlayMode;
   });
 }
 
@@ -165,7 +184,7 @@ function busyCopy(label) {
 
 function setBusy(nextBusy, label = "") {
   busy = nextBusy;
-  [newGameBtn, undoBtn, analyzeBtn, simSlider, ...sideButtons].forEach((el) => {
+  [newGameBtn, undoBtn, analyzeBtn, simSlider, ...sideInputs].forEach((el) => {
     el.disabled = busy;
   });
   boardEl.classList.toggle("busy", busy);
@@ -216,9 +235,9 @@ worker.addEventListener("error", (event) => {
 });
 
 function buildBoard(size) {
-  boardEl.innerHTML = "";
-  colCoords.innerHTML = "";
-  rowCoords.innerHTML = "";
+  boardEl.replaceChildren();
+  colCoords.replaceChildren();
+  rowCoords.replaceChildren();
   cells = [];
   for (let i = 0; i < size; i += 1) {
     const col = document.createElement("div");
@@ -233,7 +252,6 @@ function buildBoard(size) {
       const cell = document.createElement("button");
       cell.className = "cell";
       cell.type = "button";
-      cell.setAttribute("role", "gridcell");
       cell.setAttribute("aria-label", `第 ${row + 1} 行第 ${col + 1} 列`);
       cell.addEventListener("click", () => makeMove(row, col));
       boardEl.appendChild(cell);
@@ -254,7 +272,7 @@ function renderBoard() {
     const row = Math.floor(idx / size);
     const col = idx % size;
     const value = state.board[row][col];
-    cell.innerHTML = "";
+    cell.replaceChildren();
     cell.className = "cell";
     if (value !== 0) {
       const stone = document.createElement("span");
@@ -400,14 +418,17 @@ function renderRecommendation() {
 function renderCandidates() {
   const context = activeAnalysisContext();
   const a = context && context.analysis;
-  candBody.innerHTML = "";
+  candBody.replaceChildren();
   const cands = (a && a.candidates) || [];
   candidateTitle.textContent = "候选点";
   policyCount.textContent = cands.length;
   if (!cands.length) {
     const tr = document.createElement("tr");
     tr.className = "empty-row";
-    tr.innerHTML = `<td colspan="5">点“提示”后显示候选。</td>`;
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.textContent = "点“提示”后显示候选。";
+    tr.appendChild(td);
     candBody.appendChild(tr);
     return;
   }
@@ -416,13 +437,33 @@ function renderCandidates() {
     if (c.selected) tr.classList.add("best");
     const win = c.q === null ? null : (c.q + 1) / 2;
     const shareWidth = Math.max(2, Math.min(100, c.share * 100)).toFixed(1);
-    tr.innerHTML = `
-      <td>${c.selected ? "✓ " : ""}${c.row + 1},${c.col + 1}</td>
-      <td>${c.visits}</td>
-      <td><span class="share-cell" style="--share:${shareWidth}%"><span>${pct(c.share)}</span></span></td>
-      <td>${pct(c.prior, 1)}</td>
-      <td class="${win === null ? "" : win >= 0.5 ? "q-good" : "q-bad"}">
-        ${win === null ? "-" : pct(win)}</td>`;
+    const moveCell = document.createElement("td");
+    moveCell.textContent = `${c.selected ? "✓ " : ""}${c.row + 1},${c.col + 1}`;
+    tr.appendChild(moveCell);
+
+    const visitsCell = document.createElement("td");
+    visitsCell.textContent = c.visits;
+    tr.appendChild(visitsCell);
+
+    const shareCell = document.createElement("td");
+    const share = document.createElement("span");
+    const shareText = document.createElement("span");
+    share.className = "share-cell";
+    share.style.setProperty("--share", `${shareWidth}%`);
+    shareText.textContent = pct(c.share);
+    share.appendChild(shareText);
+    shareCell.appendChild(share);
+    tr.appendChild(shareCell);
+
+    const priorCell = document.createElement("td");
+    priorCell.textContent = pct(c.prior, 1);
+    tr.appendChild(priorCell);
+
+    const winCell = document.createElement("td");
+    if (win !== null) winCell.className = win >= 0.5 ? "q-good" : "q-bad";
+    winCell.textContent = win === null ? "-" : pct(win);
+    tr.appendChild(winCell);
+
     const idx = c.row * state.size + c.col;
     tr.addEventListener("mouseenter", () => cells[idx].classList.add("hl"));
     tr.addEventListener("mouseleave", () => cells[idx].classList.remove("hl"));
@@ -436,8 +477,185 @@ function svgEl(name, attrs = {}) {
   return el;
 }
 
+function loadTreeLibrary() {
+  if (!d3TreePromise) {
+    d3TreePromise = new Promise((resolve, reject) => {
+      if (window.d3) {
+        resolve(window.d3);
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "./assets/vendor/d3/d3.min.js";
+      script.async = true;
+      script.onload = () => (window.d3 ? resolve(window.d3) : reject(new Error("D3 未暴露全局对象")));
+      script.onerror = () => reject(new Error("D3 加载失败"));
+      document.head.appendChild(script);
+    });
+  }
+  return d3TreePromise;
+}
+
+function renderTreeMessage(title, detail) {
+  treeSvg.replaceChildren();
+  treeSvg.setAttribute("viewBox", "0 0 920 460");
+  const group = svgEl("g", { class: "tree-message", transform: "translate(460 220)" });
+  const titleText = svgEl("text", {
+    class: "tree-empty tree-empty-title",
+    "text-anchor": "middle",
+  });
+  titleText.textContent = title;
+  const detailText = svgEl("text", {
+    class: "tree-empty",
+    y: 24,
+    "text-anchor": "middle",
+  });
+  detailText.textContent = detail;
+  group.append(titleText, detailText);
+  treeSvg.appendChild(group);
+}
+
+function buildTreeData(nodes) {
+  const byId = new Map(nodes.map((node) => [node.id, { ...node, children: [] }]));
+  let root = null;
+  nodes.forEach((node) => {
+    const next = byId.get(node.id);
+    if (node.parentId === null) {
+      root = next;
+      return;
+    }
+    const parent = byId.get(node.parentId);
+    if (parent) parent.children.push(next);
+  });
+  return root;
+}
+
+function treeNodeRadius(node) {
+  if (node.depth === 0) return 11;
+  const share = Math.max(0.01, node.branchShare || node.share || 0.01);
+  if (node.depth === 1) return 7 + Math.sqrt(share) * 15;
+  if (node.depth === 2) return 5 + Math.sqrt(share) * 8;
+  if (node.depth === 3) return 4 + Math.sqrt(share) * 5;
+  return 3.3 + Math.sqrt(share) * 3.2;
+}
+
+function treeNodeLabel(node) {
+  if (node.depth === 0) return "当前";
+  if (node.depth <= 1 || node.principal) return `${node.row + 1},${node.col + 1}`;
+  return "";
+}
+
+function treeNodeTitle(node) {
+  if (node.depth === 0) return "当前局面";
+  const move = `${node.mover === 1 ? "黑" : "白"} ${node.row + 1},${node.col + 1}`;
+  const win = node.winProb === null ? "-" : pct(node.winProb);
+  return `${move} · 模拟 ${node.visits} · 分支 ${pct(node.branchShare || 0)} · 当前方胜率 ${win}`;
+}
+
+function renderTreeWithD3(nodes, edges) {
+  const rootData = buildTreeData(nodes);
+  if (!rootData) {
+    renderTreeMessage("搜索树数据不完整", "候选点仍然可以在下方表格查看");
+    return;
+  }
+
+  const maxDepth = Math.max(...nodes.map((node) => node.depth));
+  const width = 920;
+  const height = Math.max(460, 148 + Math.max(1, maxDepth) * 72);
+  const margin = { top: 46, right: 52, bottom: 42, left: 52 };
+  const edgeByTarget = new Map(edges.map((edge) => [edge.to, edge]));
+  const root = d3Tree.hierarchy(rootData);
+  root.sort((a, b) => Number(b.data.principal) - Number(a.data.principal)
+    || (b.data.visits || 0) - (a.data.visits || 0)
+    || (a.data.rank || 0) - (b.data.rank || 0));
+
+  d3Tree.tree()
+    .size([width - margin.left - margin.right, height - margin.top - margin.bottom])
+    .separation((a, b) => (a.parent === b.parent ? 1 : 1.35) + Math.abs(a.depth - b.depth) * 0.08)(root);
+
+  root.each((node) => {
+    node.x += margin.left;
+    node.y += margin.top;
+  });
+
+  const svg = d3Tree.select(treeSvg);
+  svg.selectAll("*").remove();
+  svg.attr("viewBox", `0 0 ${width} ${height}`);
+
+  const depthLabels = ["当前", "候选落点", "回应", "再展开", "深层", "尾部", "末端"];
+  const rows = Array.from(d3Tree.group(root.descendants(), (node) => node.depth), ([depth, group]) => ({
+    depth,
+    y: group[0].y,
+  })).sort((a, b) => a.depth - b.depth);
+
+  const backdrop = svg.append("g").attr("class", "tree-backdrop");
+  backdrop.selectAll("line")
+    .data(rows)
+    .join("line")
+    .attr("class", "tree-depth-line")
+    .attr("x1", 28)
+    .attr("x2", width - 28)
+    .attr("y1", (row) => row.y)
+    .attr("y2", (row) => row.y);
+
+  backdrop.selectAll("text")
+    .data(rows)
+    .join("text")
+    .attr("class", "tree-depth-label")
+    .attr("x", 34)
+    .attr("y", (row) => row.y - 10)
+    .text((row) => depthLabels[row.depth] || `第 ${row.depth} 层`);
+
+  const link = d3Tree.linkVertical()
+    .x((node) => node.x)
+    .y((node) => node.y);
+
+  svg.append("g")
+    .attr("class", "tree-edges")
+    .selectAll("path")
+    .data(root.links())
+    .join("path")
+    .attr("class", (linkData) => {
+      const edge = edgeByTarget.get(linkData.target.data.id);
+      const strong = edge && edge.share > 0.45;
+      return `tree-edge depth-${linkData.target.depth} ${edge && edge.principal ? "best" : strong ? "strong" : ""}`;
+    })
+    .attr("d", link)
+    .attr("opacity", (linkData) => {
+      const edge = edgeByTarget.get(linkData.target.data.id);
+      return edge ? (0.25 + Math.min(0.55, edge.share * 0.72)).toFixed(2) : 0.28;
+    })
+    .attr("stroke-width", (linkData) => {
+      const edge = edgeByTarget.get(linkData.target.data.id);
+      const share = edge ? edge.share : 0.06;
+      return (0.85 + Math.sqrt(Math.max(0.02, share)) * (edge && edge.principal ? 5.8 : 3.4)).toFixed(2);
+    });
+
+  const node = svg.append("g")
+    .attr("class", "tree-nodes")
+    .selectAll("g")
+    .data(root.descendants())
+    .join("g")
+    .attr("class", (item) => {
+      const data = item.data;
+      const color = item.depth === 0 ? "root" : data.mover === 1 ? "black" : "white";
+      return `tree-node depth-${item.depth} ${color} ${data.principal && item.depth > 0 ? "best" : ""}`;
+    })
+    .attr("transform", (item) => `translate(${item.x.toFixed(1)},${item.y.toFixed(1)})`);
+
+  node.append("circle")
+    .attr("r", (item) => Math.min(item.depth >= 4 ? 5 : item.depth === 3 ? 6.2 : item.depth === 2 ? 9.5 : 22, treeNodeRadius(item.data)).toFixed(1));
+
+  node.append("title")
+    .text((item) => treeNodeTitle(item.data));
+
+  node.append("text")
+    .attr("text-anchor", "middle")
+    .attr("y", (item) => Math.min(item.depth >= 4 ? 5 : item.depth === 3 ? 6.2 : item.depth === 2 ? 9.5 : 22, treeNodeRadius(item.data)) + 15)
+    .text((item) => treeNodeLabel(item.data));
+}
+
 function renderTree() {
-  treeSvg.innerHTML = "";
+  treeSvg.replaceChildren();
   const context = activeAnalysisContext();
   const a = context && context.analysis;
   const tree = a && a.tree;
@@ -445,7 +663,7 @@ function renderTree() {
   const edges = tree && tree.edges ? tree.edges : [];
   treeTitle.textContent = "MCTS 树";
   treeCopy.textContent = context
-    ? "当前局面的搜索摘要。"
+    ? "这里只显示访问最多的摘要树。线越粗，代表这条分支被模拟得越多；红线是当前主线。"
     : "点“提示”后显示。";
   treeCount.textContent = Math.max(0, nodes.length - 1);
   treeDepth.textContent = nodes.length ? "深度 -" : "等待建议";
@@ -454,237 +672,55 @@ function renderTree() {
     : "MCTS 搜索树，尚无搜索数据");
 
   if (!nodes.length) {
-    const text = svgEl("text", {
-      x: 420,
-      y: 160,
-      class: "tree-empty",
-      "text-anchor": "middle",
-    });
-    const lines = ["还没有搜索树", "点“提示”后显示"];
-    lines.forEach((line, index) => {
-      const tspan = svgEl("tspan", {
-        x: 420,
-        dy: index === 0 ? 0 : 20,
-      });
-      tspan.textContent = line;
-      text.appendChild(tspan);
-    });
-    treeSvg.appendChild(text);
+    renderTreeMessage("还没有搜索树", "点“提示”后显示");
     return;
   }
 
-  const width = 840;
-  const height = 380;
   const maxDepth = Math.max(...nodes.map((node) => node.depth));
   const principalDepth = nodes.filter((node) => node.principal).length - 1;
   treeDepth.textContent = `主线 ${Math.max(0, principalDepth)} 层 / 摘要 ${maxDepth} 层`;
-  const depthY = [34, 92, 150, 208, 266, 322, 356];
-  const depthLabels = ["当前", "候选落点", "回应", "再展开", "深层", "尾部", "末端"];
-  const byDepth = new Map();
-  nodes.forEach((node) => {
-    if (!byDepth.has(node.depth)) byDepth.set(node.depth, []);
-    byDepth.get(node.depth).push(node);
-  });
 
-  const positions = new Map();
-  const root = nodes.find((node) => node.depth === 0);
-  if (root) positions.set(root.id, { x: width / 2, y: depthY[0] });
-  const first = byDepth.get(1) || [];
-  first.forEach((node, index) => {
-    const x = 74 + ((index + 1) / (first.length + 1)) * (width - 148);
-    positions.set(node.id, { x, y: depthY[1] });
-  });
-
-  for (let depth = 2; depth <= maxDepth; depth += 1) {
-    const byParent = new Map();
-    (byDepth.get(depth) || []).forEach((node) => {
-      if (!byParent.has(node.parentId)) byParent.set(node.parentId, []);
-      byParent.get(node.parentId).push(node);
-    });
-    for (const [parentId, group] of byParent.entries()) {
-      const parent = positions.get(parentId);
-      if (!parent) continue;
-      const step = depth === 2 ? 38 : depth === 3 ? 26 : depth === 4 ? 18 : 13;
-      group.forEach((node, index) => {
-        const spread = group.length === 1 ? 0 : (index - (group.length - 1) / 2) * step;
-        positions.set(node.id, {
-          x: Math.max(20, Math.min(width - 20, parent.x + spread)),
-          y: depthY[depth] || (height - 24),
-        });
-      });
-    }
+  if (!analysisDetails.open && !d3Tree) {
+    renderTreeMessage("搜索树已就绪", "展开“分析详情”后加载树布局");
+    return;
   }
 
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const backdrop = svgEl("g", { class: "tree-backdrop" });
-  depthY.slice(1, Math.min(maxDepth + 1, depthY.length)).forEach((y) => {
-    backdrop.appendChild(svgEl("line", {
-      x1: 26,
-      y1: y.toFixed(1),
-      x2: (width - 26).toFixed(1),
-      y2: y.toFixed(1),
-      class: "tree-depth-line",
-    }));
-    const label = svgEl("text", {
-      x: 34,
-      y: (y - 8).toFixed(1),
-      class: "tree-depth-label",
-    });
-    label.textContent = depthLabels[depthY.indexOf(y)] || `第 ${depthY.indexOf(y)} 层`;
-    backdrop.appendChild(label);
-  });
-  treeSvg.appendChild(backdrop);
+  if (d3TreeError) {
+    renderTreeMessage("树图加载失败", "D3 CDN 暂时不可用，候选表仍可用");
+    return;
+  }
 
-  const curvePoint = (a, b, t) => {
-    const midY = a.y + (b.y - a.y) * 0.48;
-    const c1 = { x: a.x, y: midY };
-    const c2 = { x: b.x, y: midY };
-    const mt = 1 - t;
-    return {
-      x: mt ** 3 * a.x + 3 * mt ** 2 * t * c1.x + 3 * mt * t ** 2 * c2.x + t ** 3 * b.x,
-      y: mt ** 3 * a.y + 3 * mt ** 2 * t * c1.y + 3 * mt * t ** 2 * c2.y + t ** 3 * b.y,
-    };
-  };
-
-  const edgeLayer = svgEl("g", { class: "tree-edges" });
-  const pulseLayer = svgEl("g", { class: "tree-pulses" });
-  edges.forEach((edge) => {
-    const a = positions.get(edge.from);
-    const b = positions.get(edge.to);
-    if (!a || !b) return;
-    const target = nodeById.get(edge.to);
-    const midY = a.y + (b.y - a.y) * 0.48;
-    edgeLayer.appendChild(svgEl("path", {
-      d: `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} C ${a.x.toFixed(1)} ${midY.toFixed(1)}, ${b.x.toFixed(1)} ${midY.toFixed(1)}, ${b.x.toFixed(1)} ${b.y.toFixed(1)}`,
-      class: `tree-edge depth-${target ? target.depth : 1} ${edge.principal ? "best" : edge.share > 0.45 ? "strong" : ""}`,
-      opacity: (0.24 + Math.min(0.55, edge.share * 0.7)).toFixed(2),
-      "stroke-width": (0.65 + Math.sqrt(Math.max(0.02, edge.share)) * (edge.principal ? 5.4 : 3.6)).toFixed(2),
-    }));
-
-    const pulseCount = edge.principal ? 5 : edge.share > 0.25 ? 3 : 2;
-    for (let i = 0; i < pulseCount; i += 1) {
-      const p = curvePoint(a, b, (i + 1) / (pulseCount + 1));
-      const pulse = svgEl("circle", {
-        cx: p.x.toFixed(1),
-        cy: p.y.toFixed(1),
-        r: (edge.principal ? 1.9 : 1.15).toFixed(1),
-        class: `tree-pulse ${edge.principal ? "best" : ""}`,
+  if (!d3Tree) {
+    renderTreeMessage("加载树布局", "首次显示会载入 D3");
+    loadTreeLibrary()
+      .then((module) => {
+        d3Tree = module;
+        if (state) renderTree();
+      })
+      .catch(() => {
+        d3TreeError = true;
+        renderTreeMessage("树图加载失败", "D3 CDN 暂时不可用，候选表仍可用");
       });
-      pulse.setAttribute("style", `animation-delay:${(-(i * 0.22 + (target ? target.depth : 1) * 0.12)).toFixed(2)}s`);
-      pulseLayer.appendChild(pulse);
-    }
-  });
-  treeSvg.appendChild(edgeLayer);
-  treeSvg.appendChild(pulseLayer);
+    return;
+  }
 
-  const nodeLayer = svgEl("g", { class: "tree-nodes" });
-  nodes.forEach((node) => {
-    const p = positions.get(node.id);
-    if (!p) return;
-    const isRoot = node.depth === 0;
-    const r = isRoot ? 10 : node.depth === 1
-      ? 6 + Math.sqrt(Math.max(0.01, node.share)) * 18
-      : node.depth === 2
-        ? 4.5 + Math.sqrt(Math.max(0.01, node.branchShare || node.share)) * 7
-        : node.depth === 3
-          ? 2.9 + Math.sqrt(Math.max(0.01, node.branchShare || node.share)) * 4
-          : 2.4 + Math.sqrt(Math.max(0.01, node.branchShare || node.share)) * 3;
-    const group = svgEl("g", {
-      class: `tree-node depth-${node.depth} ${isRoot ? "root" : node.mover === 1 ? "black" : "white"} ${node.principal && !isRoot ? "best" : ""}`,
-    });
-    const circle = svgEl("circle", {
-      cx: p.x.toFixed(1),
-      cy: p.y.toFixed(1),
-      r: Math.min(node.depth >= 4 ? 4.2 : node.depth === 3 ? 5.6 : node.depth === 2 ? 8.5 : 18, r).toFixed(1),
-    });
-    const title = svgEl("title");
-    const move = isRoot ? "当前局面" : `${node.mover === 1 ? "黑" : "白"} ${node.row + 1},${node.col + 1}`;
-    const win = node.winProb === null ? "-" : pct(node.winProb);
-    title.textContent = `${move} · 模拟 ${node.visits} · 分支 ${pct(node.branchShare || 0)} · 当前方胜率 ${win}`;
-    circle.appendChild(title);
-    group.appendChild(circle);
-
-    const label = svgEl("text", {
-      x: p.x.toFixed(1),
-      y: (p.y + Math.min(node.depth >= 4 ? 4.2 : node.depth === 3 ? 5.6 : node.depth === 2 ? 8.5 : 18, r) + 13).toFixed(1),
-      class: `tree-label depth-${node.depth}`,
-      "text-anchor": "middle",
-    });
-    label.textContent = isRoot ? "当前" : `${node.row + 1},${node.col + 1}`;
-    group.appendChild(label);
-    nodeLayer.appendChild(group);
-  });
-  treeSvg.appendChild(nodeLayer);
+  renderTreeWithD3(nodes, edges);
 }
 
 function renderHistory() {
   historyCount.textContent = state.movesPlayed;
-  historyList.innerHTML = "";
+  historyList.replaceChildren();
   [...state.history].reverse().forEach((move, index) => {
     const item = document.createElement("li");
     const n = state.movesPlayed - index;
-    item.innerHTML = `<span>${n}. ${move.player === "black" ? "黑" : "白"} ${move.row + 1},${move.col + 1}</span>
-      <span class="move-source">${move.source === "ai" ? "AI" : "人类"}</span>`;
+    const moveLabel = document.createElement("span");
+    moveLabel.textContent = `${n}. ${move.player === "black" ? "黑" : "白"} ${move.row + 1},${move.col + 1}`;
+    const source = document.createElement("span");
+    source.className = "move-source";
+    source.textContent = move.source === "ai" ? "AI" : "人类";
+    item.append(moveLabel, source);
     historyList.appendChild(item);
   });
-}
-
-function renderChart() {
-  const ctx = chartCanvas.getContext("2d");
-  const dpr = window.devicePixelRatio || 1;
-  const cssW = chartCanvas.clientWidth || 280;
-  const cssH = chartCanvas.clientHeight || 110;
-  const style = getComputedStyle(document.documentElement);
-  chartCanvas.width = cssW * dpr;
-  chartCanvas.height = cssH * dpr;
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, cssW, cssH);
-
-  const pad = { l: 8, r: 8, t: 8, b: 16 };
-  const w = cssW - pad.l - pad.r;
-  const h = cssH - pad.t - pad.b;
-  const data = state.evalHistory || [];
-
-  ctx.strokeStyle = "rgba(111,120,109,0.22)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(pad.l, pad.t, w, h);
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  ctx.moveTo(pad.l, pad.t + h / 2);
-  ctx.lineTo(pad.l + w, pad.t + h / 2);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  if (!data.length) return;
-
-  const maxMove = Math.max(...data.map((d) => d.move), 1);
-  const x = (m) => pad.l + (m / maxMove) * w;
-  const y = (p) => pad.t + (1 - p) * h;
-
-  ctx.beginPath();
-  data.forEach((d, i) => {
-    if (i === 0) ctx.moveTo(x(d.move), y(d.blackWinProb));
-    else ctx.lineTo(x(d.move), y(d.blackWinProb));
-  });
-  ctx.lineTo(x(data[data.length - 1].move), pad.t + h);
-  ctx.lineTo(x(data[0].move), pad.t + h);
-  ctx.closePath();
-  const fill = ctx.createLinearGradient(0, pad.t, 0, pad.t + h);
-  fill.addColorStop(0, "rgba(27,122,115,0.18)");
-  fill.addColorStop(1, "rgba(194,75,51,0.06)");
-  ctx.fillStyle = fill;
-  ctx.fill();
-
-  ctx.beginPath();
-  data.forEach((d, i) => {
-    if (i === 0) ctx.moveTo(x(d.move), y(d.blackWinProb));
-    else ctx.lineTo(x(d.move), y(d.blackWinProb));
-  });
-  ctx.strokeStyle = style.getPropertyValue("--accent-2").trim() || "rgba(27,122,115,0.95)";
-  ctx.lineWidth = 2;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.stroke();
 }
 
 function render(nextState) {
@@ -697,7 +733,6 @@ function render(nextState) {
   renderCandidates();
   renderTree();
   renderHistory();
-  renderChart();
 
   const simIndex = simulationIndexFor(state.simulations);
   simSlider.value = simIndex;
@@ -773,22 +808,62 @@ async function analyze() {
   }
 }
 
+async function initNetworkDiagram() {
+  if (!networkDiagram || mermaidReady || mermaidError) return;
+  networkDiagram.textContent = "网络结构图加载中";
+  try {
+    if (!mermaidPromise) {
+      mermaidPromise = import("./assets/vendor/mermaid/mermaid.esm.min.mjs");
+    }
+    const { default: mermaid } = await mermaidPromise;
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "base",
+      flowchart: {
+        curve: "basis",
+        htmlLabels: true,
+      },
+      themeVariables: {
+        background: "transparent",
+        primaryColor: "#ffffff",
+        primaryTextColor: "#20231f",
+        primaryBorderColor: "#aab4a6",
+        lineColor: "#596255",
+        secondaryColor: "#f1f3ef",
+        tertiaryColor: "#fbfcfa",
+        fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+      },
+    });
+    const { svg } = await mermaid.render("networkDiagramSvg", NETWORK_DIAGRAM);
+    networkDiagram.innerHTML = svg;
+    networkDiagram.classList.add("is-rendered");
+    mermaidReady = true;
+  } catch (error) {
+    networkDiagram.textContent = "网络结构图加载失败。请检查 Mermaid CDN 连接。";
+    networkDiagram.classList.add("diagram-error");
+    mermaidError = true;
+  }
+}
+
 function setOverlay(mode) {
   overlayMode = mode;
   syncOverlayButtons();
   if (state) renderBoard();
 }
 
-sideButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    selectedSide = button.dataset.side;
-    sideButtons.forEach((item) => item.classList.toggle("active", item === button));
+sideInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    selectedSide = input.value;
     sideLabel.textContent = selectedSide === "black" ? "执黑" : "执白";
   });
 });
 
-overlayButtons.forEach((button) => {
-  button.addEventListener("click", () => setOverlay(button.dataset.overlay));
+overlayInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (input.checked) setOverlay(input.value);
+  });
 });
 
 pvToggle.addEventListener("change", () => {
@@ -800,8 +875,10 @@ simSlider.addEventListener("input", () => {
 newGameBtn.addEventListener("click", newGame);
 undoBtn.addEventListener("click", undo);
 analyzeBtn.addEventListener("click", analyze);
-window.addEventListener("resize", () => {
-  if (state) renderChart();
+analysisDetails.addEventListener("toggle", () => {
+  if (!analysisDetails.open) return;
+  initNetworkDiagram();
+  renderTree();
 });
 
 async function boot() {

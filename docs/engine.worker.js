@@ -1,7 +1,6 @@
 /* global ort */
 
-const ORT_VERSION = "1.20.1";
-const ORT_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
+const ORT_BASE = new URL("assets/vendor/onnxruntime-web/", self.location.href).href;
 
 let session = null;
 let modelConfig = null;
