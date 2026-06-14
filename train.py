@@ -235,7 +235,7 @@ def preset_config(name: str) -> TrainConfig:
         cfg.mcts_batch_size = 64
         cfg.epochs = 3
         cfg.train_steps_per_iteration = 128
-        cfg.batch_size = 4096
+        cfg.batch_size = 2048
         cfg.replay_size = 120_000
         cfg.learning_rate = 8.0e-5
         cfg.min_learning_rate = 8.0e-6
