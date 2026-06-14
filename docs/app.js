@@ -51,7 +51,7 @@ const networkDetails = document.querySelector(".network-details");
 const sideInputs = [...document.querySelectorAll("input[name='side']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 
-const APP_VERSION = "2026-06-14-ui-compact-analysis";
+const APP_VERSION = "2026-06-14-ui-lab-template";
 let state = null;
 let selectedSide = "white";
 let overlayMode = "none";
