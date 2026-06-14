@@ -211,12 +211,12 @@ function paintOverlays() {
   const a = state.analysis;
   if (!a || !a.visitMap) return;
   const map = overlayMode === "search" ? a.visitMap
-    : overlayMode === "prior" ? a.priorMap : null;
+    : overlayMode === "policy" ? a.priorMap : null;
   if (map) {
     const max = Math.max(...map, 1e-9);
     const rgb = overlayMode === "search"
       ? getComputedStyle(document.documentElement).getPropertyValue("--search-heat")
-      : getComputedStyle(document.documentElement).getPropertyValue("--prior-heat");
+      : getComputedStyle(document.documentElement).getPropertyValue("--policy-heat");
     map.forEach((v, idx) => {
       if (v < 5e-4) return;
       const t = Math.sqrt(v / max);
@@ -278,10 +278,10 @@ function renderEval() {
   turnEl.textContent = state.winner !== null ? "-" : playerName(state.currentPlayer);
 
   if (!a || !a.visitMap) {
-    overlayNote.textContent = "占比=深算时花在这个点上的比例；直觉=模型第一反应给它的分数";
+    overlayNote.textContent = "占比=深算时花在这个点上的比例；策略=模型自学出的落点概率，不含人工规则";
   } else {
     const src = state.policySource === "analysis" ? "当前局面深算" : "AI 上一手深算";
-    overlayNote.textContent = `${src} · ${a.simulations} sims`;
+    overlayNote.textContent = `${src} · ${a.simulations} sims · 策略来自自学模型`;
   }
 }
 

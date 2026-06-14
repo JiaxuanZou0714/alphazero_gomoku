@@ -61,10 +61,10 @@
             <div class="segmented overlay-seg" role="group" aria-label="叠加层">
               <button class="segment active" data-overlay="none" type="button">棋盘</button>
               <button class="segment" data-overlay="search" type="button">深算</button>
-              <button class="segment" data-overlay="prior" type="button">直觉</button>
+              <button class="segment" data-overlay="policy" type="button">策略</button>
             </div>
             <p class="overlay-help">
-              深算=搜索后重点关注；直觉=模型第一眼判断。
+              深算=MCTS 搜索后重点关注；策略=模型自学出的落点概率。
             </p>
           </div>
           <label class="pv-toggle">
@@ -137,10 +137,10 @@
             <span>候选点</span>
             <strong id="policyCount">0</strong>
           </div>
-          <p class="source" id="overlayNote">占比=深算时花在这个点上的比例；直觉=模型第一反应给它的分数</p>
+          <p class="source" id="overlayNote">占比=深算时花在这个点上的比例；策略=模型自学出的落点概率，不含人工规则</p>
           <table>
             <thead>
-              <tr><th>点位</th><th>模拟</th><th>占比</th><th>直觉</th><th>胜率</th></tr>
+              <tr><th>点位</th><th>模拟</th><th>占比</th><th>策略</th><th>胜率</th></tr>
             </thead>
             <tbody id="candBody"></tbody>
           </table>

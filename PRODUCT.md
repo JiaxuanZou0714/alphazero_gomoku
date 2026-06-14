@@ -10,7 +10,7 @@ People who want to play 10x10 Gomoku against a browser-hosted AlphaZero-style mo
 
 ## Product Purpose
 
-Provide a deployable GitHub Pages game interface that lets a user play, request a hint, inspect candidate moves, compare neural-network intuition with MCTS search, and understand the principal variation without needing a backend server.
+Provide a deployable GitHub Pages game interface that lets a user play, request a hint, inspect candidate moves, compare self-learned policy probabilities with MCTS search, and understand the principal variation without needing a backend server.
 
 ## Brand Personality
 

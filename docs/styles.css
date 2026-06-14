@@ -18,7 +18,7 @@
   --board-dark: #6f4a21;
   --shadow: none;
   --search-heat: 184 90 73;
-  --prior-heat: 47 116 110;
+  --policy-heat: 47 116 110;
   --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
