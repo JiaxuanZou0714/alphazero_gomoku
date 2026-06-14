@@ -171,7 +171,7 @@ class Node {
 class BrowserMCTS {
   constructor(config) {
     this.config = {
-      simulations: 256,
+      simulations: 512,
       cPuct: Number(config.mcts_c_puct ?? 1.5),
       evalBatchSize: Math.max(1, Math.min(Number(config.mcts_batch_size ?? 16), 64)),
       rootPolicyTemp: Number(config.mcts_root_policy_temp ?? 1.0),
@@ -180,11 +180,11 @@ class BrowserMCTS {
     };
   }
 
-  async search(state, simulations = null) {
+  async search(state, simulations = null, reuseRoot = null) {
     if (state.winner !== null) throw new Error("终局不能搜索");
     const sims = Math.max(1, simulations ?? this.config.simulations);
-    const root = new Node(1, 1);
-    await this.expand(root, state, true);
+    const root = reuseRoot instanceof Node ? reuseRoot : new Node(1, 1);
+    if (!root.expanded) await this.expand(root, state, true);
 
     let simulationsDone = 0;
     while (simulationsDone < sims) {
@@ -431,6 +431,7 @@ function stateKey(state) {
     state.currentPlayer,
     state.lastMove === null ? "none" : state.lastMove,
     state.winner === null ? "none" : state.winner,
+    Array.from(state.board).join(","),
   ].join(":");
 }
 
@@ -571,7 +572,7 @@ function buildSearchTree(root, state) {
 class GameSession {
   constructor(config) {
     this.config = config;
-    this.defaultSimulations = 256;
+    this.defaultSimulations = 512;
     this.mcts = new BrowserMCTS(config);
     this.state = GomokuState.new(
       Number(this.config.board_size ?? 10),
@@ -586,6 +587,29 @@ class GameSession {
     this.evaluation = null;
     this.evalHistory = [];
     this.undoStack = [];
+    this.reusableRoot = null;
+    this.reusableKey = null;
+  }
+
+  currentReusableRoot() {
+    return this.reusableRoot && this.reusableKey === stateKey(this.state)
+      ? this.reusableRoot
+      : null;
+  }
+
+  storeReusableRoot(root, state = this.state) {
+    if (root && state.winner === null) {
+      this.reusableRoot = root;
+      this.reusableKey = stateKey(state);
+    } else {
+      this.reusableRoot = null;
+      this.reusableKey = null;
+    }
+  }
+
+  childReusableRoot(action) {
+    const root = this.currentReusableRoot();
+    return root ? root.children.get(action) || null : null;
   }
 
   newGame(human = "white", simulations = this.defaultSimulations) {
@@ -602,6 +626,7 @@ class GameSession {
     this.evaluation = null;
     this.evalHistory = [];
     this.undoStack = [];
+    this.storeReusableRoot(null);
     return this.playOpeningIfNeeded();
   }
 
@@ -616,6 +641,8 @@ class GameSession {
     if (this.state.currentPlayer !== this.humanPlayer) throw new Error("还没轮到你");
     const action = this.state.coordToAction(row, col);
     if (this.state.board[action] !== 0) throw new Error("这个点已经有棋子");
+    const nextRoot = this.childReusableRoot(action);
+    const nextState = this.state.apply(action);
     this.undoStack.push({
       state: this.state.clone(),
       history: this.history.map((m) => ({ ...m })),
@@ -624,12 +651,15 @@ class GameSession {
       policyPlayer: this.policyPlayer,
       evaluation: structuredClone(this.evaluation),
       evalHistory: this.evalHistory.map((e) => ({ ...e })),
+      reusableRoot: this.reusableRoot,
+      reusableKey: this.reusableKey,
     });
-    this.state = this.state.apply(action);
+    this.state = nextState;
     this.lastAnalysis = {};
     this.policySource = "none";
     this.policyPlayer = null;
     this.evaluation = this.state.winner === null ? null : terminalEvaluation(this.state);
+    this.storeReusableRoot(nextRoot);
     this.history.push({ player: this.state.currentPlayer === -1 ? "black" : "white", source: "human", row, col });
     if (this.state.winner === null) await this.aiMove();
     return this.snapshot();
@@ -645,6 +675,8 @@ class GameSession {
     this.policyPlayer = previous.policyPlayer;
     this.evaluation = previous.evaluation;
     this.evalHistory = previous.evalHistory;
+    this.reusableRoot = previous.reusableRoot;
+    this.reusableKey = previous.reusableKey;
     return this.snapshot();
   }
 
@@ -691,7 +723,7 @@ class GameSession {
 
   async aiMove() {
     const player = this.state.currentPlayer;
-    const { action, analysis } = await this.searchPolicy();
+    const { action, analysis, root } = await this.searchPolicy();
     if (action < 0 || action === undefined) throw new Error("AI 没找到合法落点");
     this.lastAnalysis = analysis;
     this.policySource = "ai_move";
@@ -702,13 +734,17 @@ class GameSession {
     this.evaluation = childEvaluation(analysis, action, nextState);
     if (this.evaluation) this.recordEval(this.evaluation);
     this.state = nextState;
+    this.storeReusableRoot(root.children.get(action) || null);
     this.history.push({ player: player === 1 ? "black" : "white", source: "ai", row, col });
   }
 
   async searchPolicy() {
     const start = performance.now();
-    const root = await this.mcts.search(this.state, this.simulations);
-    return searchAnalysis(root, this.state, performance.now() - start);
+    const root = await this.mcts.search(this.state, this.simulations, this.currentReusableRoot());
+    this.storeReusableRoot(root);
+    const result = searchAnalysis(root, this.state, performance.now() - start);
+    result.root = root;
+    return result;
   }
 
   recordEval(evaluation) {

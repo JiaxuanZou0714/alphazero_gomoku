@@ -67,7 +67,7 @@ const pending = new Map();
 
 const worker = new Worker("./engine.worker.js");
 
-const SIMULATION_OPTIONS = [16, 32, 64, 128, 256, 512];
+const SIMULATION_OPTIONS = [16, 32, 64, 128, 256, 512, 1024, 2048];
 const NETWORK_DIAGRAM = String.raw`
 flowchart LR
   input["棋盘输入<br/>2×10×10"]
@@ -86,11 +86,15 @@ const moveText = (move) => (move ? `${move.row + 1},${move.col + 1}` : "-");
 
 function stateKey(s) {
   if (!s) return "";
+  const boardKey = Array.isArray(s.board)
+    ? s.board.map((row) => row.join(",")).join(",")
+    : "";
   return [
     s.movesPlayed,
     s.currentPlayer,
     s.lastMove === null ? "none" : s.lastMove,
     s.winner === null ? "none" : s.winner,
+    boardKey,
   ].join(":");
 }
 
@@ -108,7 +112,7 @@ function simulationIndexFor(value) {
 }
 
 function selectedSimulations() {
-  return SIMULATION_OPTIONS[Number(simSlider.value)] || 256;
+  return SIMULATION_OPTIONS[Number(simSlider.value)] || 512;
 }
 
 function syncSimulationDisplay(value = selectedSimulations()) {
