@@ -5,8 +5,8 @@
   --surface-2: #f1f3ef;
   --surface-3: #e7ebe4;
   --ink: #20231f;
-  --muted: #60695e;
-  --soft: #858d82;
+  --muted: #4f594d;
+  --soft: #596255;
   --line: #d9dfd4;
   --line-strong: #aab4a6;
   --accent: #b85a49;
@@ -71,7 +71,7 @@ button:active:not(:disabled) {
 }
 
 button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.5;
 }
 
@@ -85,6 +85,7 @@ input:focus-visible,
 .app-shell {
   display: grid;
   grid-template-columns: minmax(620px, 1fr) minmax(336px, 372px);
+  grid-template-rows: auto auto;
   gap: 16px;
   width: min(1440px, 100%);
   min-height: 100vh;
@@ -100,7 +101,7 @@ input:focus-visible,
 
 .board-pane {
   display: grid;
-  grid-template-rows: auto auto auto auto auto;
+  grid-template-rows: auto auto auto auto;
   gap: 14px;
   min-height: calc(100vh - 36px);
 }
@@ -277,12 +278,14 @@ h1 {
 .load-bar span {
   position: relative;
   display: block;
-  width: 0%;
+  width: 100%;
   height: 100%;
   border-radius: inherit;
   background: var(--accent-2);
   overflow: hidden;
-  transition: width 180ms var(--ease-out);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 180ms var(--ease-out);
 }
 
 .load-bar span::after {
@@ -316,9 +319,11 @@ h1 {
   left: 0;
   bottom: 0;
   width: 100%;
-  height: 50%;
+  height: 100%;
   background: linear-gradient(180deg, #34362f, var(--black));
-  transition: height 180ms ease;
+  transform: scaleY(0.5);
+  transform-origin: bottom center;
+  transition: transform 180ms ease;
 }
 
 .eval-label {
@@ -638,6 +643,8 @@ h1 {
   grid-template-rows: auto;
   grid-auto-rows: auto;
   gap: 12px;
+  grid-column: 2;
+  grid-row: 1 / span 2;
   max-height: none;
   min-height: 0;
 }
@@ -710,6 +717,87 @@ h1 {
   gap: 8px;
 }
 
+.recommendation {
+  background: linear-gradient(180deg, #ffffff, #fbfcfa);
+}
+
+.recommendation .panel-title {
+  margin-bottom: 8px;
+}
+
+.recommendation-main {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 680;
+  line-height: 1.48;
+  text-wrap: pretty;
+}
+
+.recommendation-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  margin: 12px 0 10px;
+}
+
+.recommendation-metrics div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fafbf9;
+  padding: 8px;
+}
+
+.recommendation-metrics span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.recommendation-metrics strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.recommendation-why {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.analysis-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.compact-action {
+  min-height: 38px;
+  padding: 7px 10px;
+  border-color: rgba(32, 35, 31, 0.12);
+  background: var(--ink);
+  color: white;
+  font-size: 13px;
+}
+
+.compact-action.secondary {
+  background: #f8faf7;
+  color: var(--ink);
+}
+
+.compact-action.secondary:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
 .win-meter {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -745,11 +833,13 @@ h1 {
   position: absolute;
   left: 0;
   top: 0;
-  width: 50%;
+  width: 100%;
   height: 100%;
   border-right: 2px solid rgba(255, 254, 250, 0.92);
   background: linear-gradient(90deg, #0e0f0d, #34362f);
-  transition: width 180ms ease;
+  transform: scaleX(0.5);
+  transform-origin: left center;
+  transition: transform 180ms ease;
 }
 
 button.secondary {
@@ -841,6 +931,14 @@ tr.best td {
   font-weight: 760;
 }
 
+tr.empty-row td {
+  padding: 16px 8px;
+  color: var(--muted);
+  text-align: left;
+  line-height: 1.45;
+  white-space: normal;
+}
+
 .share-cell {
   position: relative;
   display: inline-grid;
@@ -879,7 +977,18 @@ tr.best td {
 .tree-panel {
   width: min(980px, 100%);
   justify-self: center;
+  grid-column: 1;
+  grid-row: 2;
   overflow: hidden;
+}
+
+.tree-copy {
+  max-width: 74ch;
+  margin: -3px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-wrap: pretty;
 }
 
 .tree-legend {
@@ -891,6 +1000,13 @@ tr.best td {
   color: var(--muted);
   font-size: 12px;
   font-weight: 720;
+}
+
+.tree-legend strong {
+  margin-left: auto;
+  color: var(--ink);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .tree-legend span {
@@ -927,19 +1043,28 @@ tr.best td {
 .tree-svg {
   display: block;
   width: 100%;
-  height: 320px;
+  height: 380px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 6px;
   background:
-    linear-gradient(rgba(32, 35, 31, 0.045) 1px, transparent 1px) 0 0 / 100% 52px,
-    linear-gradient(90deg, rgba(32, 35, 31, 0.035) 1px, transparent 1px) 0 0 / 45px 100%,
+    linear-gradient(rgba(32, 35, 31, 0.045) 1px, transparent 1px) 0 0 / 100% 56px,
+    linear-gradient(90deg, rgba(32, 35, 31, 0.03) 1px, transparent 1px) 0 0 / 56px 100%,
     #fbfcfa;
 }
 
 .tree-depth-line {
   stroke: rgba(32, 35, 31, 0.08);
   stroke-width: 1;
+}
+
+.tree-depth-label {
+  fill: var(--muted);
+  font-size: 10px;
+  font-weight: 720;
+  paint-order: stroke;
+  stroke: #fbfcfa;
+  stroke-width: 3px;
 }
 
 .tree-edge {
@@ -959,6 +1084,7 @@ tr.best td {
 .tree-edge.best {
   stroke: rgba(184, 90, 73, 0.88);
   stroke-dasharray: 8 5;
+  animation: treeFlow 1200ms linear infinite;
 }
 
 .tree-pulse {
@@ -1000,7 +1126,8 @@ tr.best td {
 
 .tree-node.depth-3 circle,
 .tree-node.depth-4 circle,
-.tree-node.depth-5 circle {
+.tree-node.depth-5 circle,
+.tree-node.depth-6 circle {
   opacity: 0.78;
   stroke-width: 1.4;
 }
@@ -1028,8 +1155,14 @@ tr.best td {
 .tree-node.depth-2 text,
 .tree-node.depth-3 text,
 .tree-node.depth-4 text,
-.tree-node.depth-5 text {
+.tree-node.depth-5 text,
+.tree-node.depth-6 text {
   display: none;
+}
+
+.tree-node.best text {
+  display: block;
+  fill: var(--accent);
 }
 
 @keyframes treePulse {
@@ -1173,6 +1306,7 @@ li {
 @media (max-width: 1060px) {
   .app-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: none;
   }
 
   .board-pane {
@@ -1189,8 +1323,17 @@ li {
 
   .side-pane {
     position: static;
+    grid-column: auto;
+    grid-row: auto;
     grid-template-rows: auto;
     max-height: none;
+  }
+
+  .tree-panel {
+    grid-column: auto;
+    grid-row: auto;
+    justify-self: stretch;
+    width: 100%;
   }
 }
 
@@ -1260,12 +1403,13 @@ li {
   }
 
   .actions,
-  dl {
+  dl,
+  .recommendation-metrics {
     grid-template-columns: repeat(2, 1fr);
   }
 
   .tree-svg {
-    height: 260px;
+    height: 300px;
   }
 
   .segment {

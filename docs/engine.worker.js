@@ -429,9 +429,9 @@ function searchAnalysis(root, state, elapsedMs) {
 function buildSearchTree(root, state) {
   const nodes = [];
   const edges = [];
-  const maxDepth = 5;
-  const principalChildLimit = [6, 3, 2, 2, 2];
-  const sideChildLimit = [6, 2, 1, 0, 0];
+  const maxDepth = 6;
+  const principalChildLimit = [6, 3, 2, 2, 1, 1];
+  const sideChildLimit = [6, 2, 1, 1, 0, 0];
   const rootVisits = Math.max(1, root.visitCount);
 
   function addNode(
@@ -500,7 +500,18 @@ class GameSession {
     this.config = config;
     this.defaultSimulations = 256;
     this.mcts = new BrowserMCTS(config);
-    this.newGame("white", this.defaultSimulations);
+    this.state = GomokuState.new(
+      Number(this.config.board_size ?? 10),
+      Number(this.config.win_length ?? 5),
+    );
+    this.humanPlayer = -1;
+    this.simulations = this.defaultSimulations;
+    this.history = [];
+    this.lastAnalysis = {};
+    this.policySource = "none";
+    this.policyPlayer = null;
+    this.evalHistory = [];
+    this.undoStack = [];
   }
 
   newGame(human = "white", simulations = this.defaultSimulations) {
@@ -508,7 +519,7 @@ class GameSession {
       Number(this.config.board_size ?? 10),
       Number(this.config.win_length ?? 5),
     );
-    this.humanPlayer = -1;
+    this.humanPlayer = human === "black" ? 1 : -1;
     this.simulations = Math.max(1, Number(simulations));
     this.history = [];
     this.lastAnalysis = {};

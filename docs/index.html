@@ -61,31 +61,18 @@
             <div class="segmented overlay-seg" role="group" aria-label="叠加层">
               <button class="segment active" data-overlay="none" type="button">棋盘</button>
               <button class="segment" data-overlay="search" type="button">深算</button>
-              <button class="segment" data-overlay="policy" type="button">策略</button>
+              <button class="segment" data-overlay="policy" type="button">倾向</button>
             </div>
             <p class="overlay-help">
-              深算=MCTS 搜索后重点关注；策略=模型自学出的落点概率。
+              深算=AI 想过之后重点看的点；倾向=搜索前模型按自学经验给出的落点概率。
             </p>
           </div>
           <label class="pv-toggle">
             <input id="pvToggle" type="checkbox" checked />
-            <span>后续路线</span>
-            <small>数字表示预测第几步</small>
+            <span>主线预测</span>
+            <small>数字表示双方按搜索主线走的顺序</small>
           </label>
         </div>
-
-        <section class="panel tree-panel">
-          <div class="panel-title">
-            <span>MCTS 搜索树</span>
-            <strong id="treeCount">0</strong>
-          </div>
-          <div class="tree-legend" aria-label="MCTS 图例">
-            <span><i class="legend-line main"></i>主线</span>
-            <span><i class="legend-line branch"></i>候选分支</span>
-            <span><i class="legend-dot"></i>模拟局面</span>
-          </div>
-          <svg id="treeSvg" class="tree-svg" viewBox="0 0 760 320" role="img" aria-label="MCTS 搜索树"></svg>
-        </section>
       </section>
 
       <aside class="side-pane">
@@ -95,6 +82,7 @@
             <strong id="sideLabel">执白</strong>
           </div>
           <div class="segmented" role="group" aria-label="执棋">
+            <button class="segment" data-side="black" type="button">我执黑（先手）</button>
             <button class="segment active" data-side="white" type="button">我执白（后手）</button>
           </div>
 
@@ -108,6 +96,28 @@
             <button id="newGame" type="button">新对局</button>
             <button class="secondary" id="undo" type="button">悔棋</button>
             <button class="secondary" id="analyze" type="button">提示</button>
+          </div>
+        </section>
+
+        <section class="panel recommendation" aria-live="polite">
+          <div class="panel-title">
+            <span id="recommendationTitle">分析焦点</span>
+            <strong id="recommendationMove">当前局面</strong>
+          </div>
+          <p class="recommendation-main" id="recommendationMain">
+            模型加载后会自动开局。轮到你时点“提示”，AI 会先用 MCTS 深算，再给出下一手建议。
+          </p>
+          <div class="recommendation-metrics" aria-label="建议依据">
+            <div><span>深算占比</span><strong id="recSearch">-</strong></div>
+            <div><span>模型倾向</span><strong id="recPolicy">-</strong></div>
+            <div><span>分支胜率</span><strong id="recWin">-</strong></div>
+          </div>
+          <p class="recommendation-why" id="recommendationWhy">
+            深算看访问量，倾向看神经网络搜索前的自学判断；两者一起帮助你理解模型为什么关注这个点。
+          </p>
+          <div class="analysis-actions">
+            <button class="compact-action" id="quickAnalyze" type="button">生成建议</button>
+            <button class="compact-action secondary" id="explainLastMove" type="button">解释 AI 上手</button>
           </div>
         </section>
 
@@ -133,13 +143,13 @@
 
         <section class="panel candidates">
           <div class="panel-title">
-            <span>候选点</span>
+            <span id="candidateTitle">当前候选点</span>
             <strong id="policyCount">0</strong>
           </div>
-          <p class="source" id="overlayNote">占比=深算时花在这个点上的比例；策略=模型自学出的落点概率，不含人工规则</p>
+          <p class="source" id="overlayNote">占比=深算时花在这个点上的比例；倾向=模型自学出的落点概率，不含人工规则</p>
           <table>
             <thead>
-              <tr><th>点位</th><th>模拟</th><th>占比</th><th>策略</th><th>胜率</th></tr>
+              <tr><th>点位</th><th>模拟</th><th>占比</th><th>倾向</th><th>胜率</th></tr>
             </thead>
             <tbody id="candBody"></tbody>
           </table>
@@ -153,6 +163,23 @@
           <ol id="historyList"></ol>
         </section>
       </aside>
+
+      <section class="panel tree-panel">
+        <div class="panel-title">
+          <span id="treeTitle">MCTS 搜索树</span>
+          <strong id="treeCount">0</strong>
+        </div>
+        <p class="tree-copy" id="treeCopy">
+          摘要树只画访问最多的主干和分支：圆越大表示模拟越多，线越粗表示这个分支被继续展开得越多，红线是当前主线。
+        </p>
+        <div class="tree-legend" aria-label="MCTS 图例">
+          <span><i class="legend-line main"></i>主线</span>
+          <span><i class="legend-line branch"></i>候选分支</span>
+          <span><i class="legend-dot"></i>模拟局面</span>
+          <strong id="treeDepth">深度 -</strong>
+        </div>
+        <svg id="treeSvg" class="tree-svg" viewBox="0 0 840 380" role="img" aria-label="MCTS 搜索树"></svg>
+      </section>
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>

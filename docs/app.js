@@ -9,14 +9,20 @@ const movesEl = document.querySelector("#moves");
 const turnEl = document.querySelector("#turn");
 const historyList = document.querySelector("#historyList");
 const historyCount = document.querySelector("#historyCount");
+const candidateTitle = document.querySelector("#candidateTitle");
 const candBody = document.querySelector("#candBody");
 const policyCount = document.querySelector("#policyCount");
 const treeSvg = document.querySelector("#treeSvg");
+const treeTitle = document.querySelector("#treeTitle");
 const treeCount = document.querySelector("#treeCount");
+const treeDepth = document.querySelector("#treeDepth");
+const treeCopy = document.querySelector("#treeCopy");
 const toast = document.querySelector("#toast");
 const newGameBtn = document.querySelector("#newGame");
 const undoBtn = document.querySelector("#undo");
 const analyzeBtn = document.querySelector("#analyze");
+const quickAnalyzeBtn = document.querySelector("#quickAnalyze");
+const explainLastMoveBtn = document.querySelector("#explainLastMove");
 const pvToggle = document.querySelector("#pvToggle");
 const overlayNote = document.querySelector("#overlayNote");
 const evalBlack = document.querySelector("#evalBlack");
@@ -34,12 +40,21 @@ const loadPercent = document.querySelector("#loadPercent");
 const computeOverlay = document.querySelector("#computeOverlay");
 const computeTitle = document.querySelector("#computeTitle");
 const computeDetail = document.querySelector("#computeDetail");
+const recommendationTitle = document.querySelector("#recommendationTitle");
+const recommendationMove = document.querySelector("#recommendationMove");
+const recommendationMain = document.querySelector("#recommendationMain");
+const recSearch = document.querySelector("#recSearch");
+const recPolicy = document.querySelector("#recPolicy");
+const recWin = document.querySelector("#recWin");
+const recommendationWhy = document.querySelector("#recommendationWhy");
 const sideButtons = [...document.querySelectorAll(".segment[data-side]")];
 const overlayButtons = [...document.querySelectorAll(".segment[data-overlay]")];
 
 let state = null;
-const HUMAN_SIDE = "white";
+let selectedSide = "white";
 let overlayMode = "none";
+let analysisFocus = "current";
+let lastAiAnalysis = null;
 let busy = true;
 let cells = [];
 let requestId = 0;
@@ -49,6 +64,85 @@ const worker = new Worker("./engine.worker.js");
 
 const playerName = (v) => (v === 1 ? "黑" : v === -1 ? "白" : "-");
 const pct = (v, digits = 0) => `${(v * 100).toFixed(digits)}%`;
+const moveText = (move) => (move ? `${move.row + 1},${move.col + 1}` : "-");
+const copyData = (value) => (typeof structuredClone === "function"
+  ? structuredClone(value)
+  : JSON.parse(JSON.stringify(value)));
+
+function syncOverlayButtons() {
+  overlayButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.overlay === overlayMode);
+  });
+}
+
+function resetAnalysisView() {
+  analysisFocus = "current";
+  overlayMode = "none";
+  syncOverlayButtons();
+}
+
+function latestAiMoveFrom(nextState = state) {
+  if (!nextState || !nextState.history || !nextState.history.length) return null;
+  const move = nextState.history[nextState.history.length - 1];
+  return move && move.source === "ai" ? move : null;
+}
+
+function samePoint(a, b) {
+  return Boolean(a && b && a.row === b.row && a.col === b.col);
+}
+
+function rememberAiSearch(nextState) {
+  const lastAiMove = latestAiMoveFrom(nextState);
+  if (!lastAiMove) {
+    lastAiAnalysis = null;
+    return;
+  }
+
+  if (nextState.policySource === "ai_move" && nextState.analysis && nextState.analysis.candidates) {
+    lastAiAnalysis = {
+      movesPlayed: nextState.movesPlayed,
+      move: { row: lastAiMove.row, col: lastAiMove.col },
+      analysis: copyData(nextState.analysis),
+    };
+    return;
+  }
+
+  if (!lastAiAnalysis
+    || lastAiAnalysis.movesPlayed !== nextState.movesPlayed
+    || !samePoint(lastAiAnalysis.move, lastAiMove)) {
+    lastAiAnalysis = null;
+  }
+}
+
+function hasFreshAiSearch() {
+  const lastAiMove = latestAiMoveFrom();
+  return Boolean(lastAiMove
+    && lastAiAnalysis
+    && lastAiAnalysis.movesPlayed === state.movesPlayed
+    && samePoint(lastAiAnalysis.move, lastAiMove));
+}
+
+function activeAnalysisContext() {
+  if (!state) return null;
+  if (analysisFocus === "ai" && hasFreshAiSearch()) {
+    return {
+      type: "ai",
+      analysis: lastAiAnalysis.analysis,
+      label: "AI 上手解释",
+    };
+  }
+  if (state.policySource === "analysis"
+    && state.analysis
+    && state.analysis.candidates
+    && state.analysis.player === state.currentPlayer) {
+    return {
+      type: "current",
+      analysis: state.analysis,
+      label: "当前局面建议",
+    };
+  }
+  return null;
+}
 
 function showToast(message) {
   toast.textContent = message;
@@ -81,7 +175,7 @@ function busyCopy(label) {
       tone: "thinking",
     };
   }
-  if (label.includes("新对局")) {
+  if (label.includes("新对局") || label.includes("开局")) {
     return {
       title: "准备新对局",
       detail: "重置棋盘、胜率和搜索树",
@@ -104,7 +198,7 @@ function busyCopy(label) {
 
 function setBusy(nextBusy, label = "") {
   busy = nextBusy;
-  [newGameBtn, undoBtn, analyzeBtn, simSlider, ...sideButtons].forEach((el) => {
+  [newGameBtn, undoBtn, analyzeBtn, quickAnalyzeBtn, explainLastMoveBtn, simSlider, ...sideButtons].forEach((el) => {
     el.disabled = busy;
   });
   boardEl.classList.toggle("busy", busy);
@@ -136,7 +230,7 @@ worker.addEventListener("message", (event) => {
   if (msg.type === "progress") {
     const pctValue = msg.payload.total ? msg.payload.loaded / msg.payload.total : 0;
     const percent = Math.max(0, Math.min(100, pctValue * 100));
-    loadBar.style.width = `${Math.max(2, percent).toFixed(1)}%`;
+    loadBar.style.transform = `scaleX(${Math.max(0.02, percent / 100).toFixed(3)})`;
     loadPercent.textContent = `${Math.round(percent)}%`;
     loadText.textContent = msg.payload.label;
     return;
@@ -208,7 +302,8 @@ function renderBoard() {
 }
 
 function paintOverlays() {
-  const a = state.analysis;
+  const context = activeAnalysisContext();
+  const a = context && context.analysis;
   if (!a || !a.visitMap) return;
   const map = overlayMode === "search" ? a.visitMap
     : overlayMode === "policy" ? a.priorMap : null;
@@ -251,22 +346,29 @@ function blackWinProb(a) {
 }
 
 function renderEval() {
-  const a = state.analysis;
+  const context = activeAnalysisContext();
+  const a = context && context.analysis;
   const bw = blackWinProb(a);
   if (bw === null) {
     winProbEl.textContent = "-";
     evalLabel.textContent = "-";
-    evalBlack.style.height = "50%";
-    winMeterBlack.style.width = "50%";
-    evalSource.textContent = "-";
+    evalBlack.style.transform = "scaleY(0.5)";
+    winMeterBlack.style.transform = "scaleX(0.5)";
+    if (state && state.winner !== null) {
+      evalSource.textContent = "对局已结束。";
+    } else if (hasFreshAiSearch()) {
+      evalSource.textContent = "当前局面还没深算；可生成建议，或解释 AI 刚才那手。";
+    } else {
+      evalSource.textContent = "点“提示”或“生成建议”后评估当前局面。";
+    }
     statSims.textContent = "-";
     statTime.textContent = "-";
   } else {
     winProbEl.textContent = pct(bw);
     evalLabel.textContent = pct(bw);
-    evalBlack.style.height = `${(bw * 100).toFixed(1)}%`;
-    winMeterBlack.style.width = `${(bw * 100).toFixed(1)}%`;
-    evalSource.textContent = state.policySource === "analysis"
+    evalBlack.style.transform = `scaleY(${bw.toFixed(3)})`;
+    winMeterBlack.style.transform = `scaleX(${bw.toFixed(3)})`;
+    evalSource.textContent = context.type === "current"
       ? `当前局面 · ${playerName(a.player)}方行棋`
       : `AI 第 ${a.moveNumber + 1} 手搜索`;
     statSims.textContent = a.simulations;
@@ -278,18 +380,101 @@ function renderEval() {
   turnEl.textContent = state.winner !== null ? "-" : playerName(state.currentPlayer);
 
   if (!a || !a.visitMap) {
-    overlayNote.textContent = "占比=深算时花在这个点上的比例；策略=模型自学出的落点概率，不含人工规则";
+    overlayNote.textContent = "候选点会跟随上方“分析焦点”变化；先生成建议，或解释 AI 上手。";
   } else {
-    const src = state.policySource === "analysis" ? "当前局面深算" : "AI 上一手深算";
-    overlayNote.textContent = `${src} · ${a.simulations} sims · 策略来自自学模型`;
+    const src = context.type === "current" ? "当前局面深算" : "AI 上一手深算";
+    overlayNote.textContent = `${src} · ${a.simulations} sims · 倾向来自自学模型`;
   }
 }
 
+function renderRecommendation() {
+  const context = activeAnalysisContext();
+  const a = context && context.analysis;
+  const cands = (a && a.candidates) || [];
+  const isHumanTurn = state && state.winner === null && state.currentPlayer === state.humanPlayer;
+  const aiSearchReady = hasFreshAiSearch();
+
+  quickAnalyzeBtn.textContent = context && context.type === "current" ? "重新深算" : "生成建议";
+  quickAnalyzeBtn.disabled = busy || !state || state.winner !== null || !isHumanTurn;
+  explainLastMoveBtn.textContent = context && context.type === "ai" ? "回到当前局面" : "解释 AI 上手";
+  explainLastMoveBtn.disabled = busy || !aiSearchReady;
+
+  if (!a || !cands.length) {
+    recommendationTitle.textContent = "分析焦点";
+    recommendationMove.textContent = isHumanTurn ? "当前局面" : "等待";
+    recSearch.textContent = "-";
+    recPolicy.textContent = "-";
+    recWin.textContent = "-";
+
+    if (state && state.winner !== null) {
+      recommendationMain.textContent = `${playerName(state.winner)}方获胜。可以新开一局，或在悔棋后继续分析。`;
+    } else if (state && state.movesPlayed === 0 && isHumanTurn) {
+      recommendationMain.textContent = "你执黑先手。可以直接在棋盘落子，也可以先点“提示”，让模型用 MCTS 深算一个开局建议。";
+    } else if (aiSearchReady && isHumanTurn) {
+      recommendationMain.textContent = "现在轮到你。生成建议会分析当前局面；解释 AI 上手会切回它刚才落子前那轮搜索。";
+    } else if (isHumanTurn) {
+      recommendationMain.textContent = "点“提示”或“生成建议”，模型会只针对当前局面深算，并给出下一手候选。";
+    } else {
+      recommendationMain.textContent = "等待 AI 完成搜索和落子。它下完以后，再选择生成当前建议或查看它上一手的搜索。";
+    }
+    recommendationWhy.textContent = "页面现在只显示一个分析焦点：当前建议用于帮你下这一手，AI 上手解释只用于回看它刚才为什么那样下。";
+    return;
+  }
+
+  const selected = cands.find((c) => c.selected) || cands[0];
+  const selectedWin = selected.q === null ? null : (selected.q + 1) / 2;
+  const winLeader = cands.reduce((best, c) => {
+    if (c.q === null) return best;
+    if (!best || c.q > best.q) return c;
+    return best;
+  }, null);
+  const policyLeader = cands.reduce((best, c) => (c.prior > best.prior ? c : best), cands[0]);
+  const selectedMove = moveText(selected);
+
+  recommendationTitle.textContent = context.type === "current" ? "下一手建议" : "AI 上手解释";
+  recommendationMove.textContent = selectedMove;
+  recSearch.textContent = pct(selected.share);
+  recPolicy.textContent = pct(selected.prior, 1);
+  recWin.textContent = selectedWin === null ? "-" : pct(selectedWin);
+  recommendationMain.textContent = context.type === "current"
+    ? `建议考虑 ${selectedMove}。这是这轮 MCTS 深算访问最多的点，代表模型想过之后最愿意继续展开的分支。`
+    : `AI 刚才落在 ${selectedMove}。这里展示的是它落子前那轮搜索，只用来解释上一手，不代表你当前该下这里。`;
+
+  const notes = [];
+  if (winLeader && winLeader !== selected) {
+    notes.push(`${moveText(winLeader)} 的分支胜率更高，但访问较少，估计更不稳定。`);
+  }
+  if (policyLeader && policyLeader !== selected) {
+    notes.push(`${moveText(policyLeader)} 是搜索前模型倾向更高的点，深算后主线转向了 ${selectedMove}。`);
+  }
+  if (!notes.length) {
+    notes.push("访问量、模型倾向和分支胜率方向一致，说明这个建议比较稳定。");
+  }
+  if (context.type === "current") {
+    notes.push("最终建议优先看深算访问量；胜率列用于理解该分支回传的局面评估。");
+  } else {
+    notes.push("这棵树是上一手的搜索快照；想知道现在怎么下，请回到当前局面并生成建议。");
+  }
+  recommendationWhy.textContent = notes.join(" ");
+}
+
 function renderCandidates() {
-  const a = state.analysis;
+  const context = activeAnalysisContext();
+  const a = context && context.analysis;
   candBody.innerHTML = "";
   const cands = (a && a.candidates) || [];
+  candidateTitle.textContent = context && context.type === "ai" ? "AI 上手候选" : "当前候选点";
   policyCount.textContent = cands.length;
+  if (!cands.length) {
+    const tr = document.createElement("tr");
+    tr.className = "empty-row";
+    const text = hasFreshAiSearch()
+      ? "当前局面还没有建议。生成建议看下一手，或解释 AI 上手看上一轮搜索。"
+      : "生成建议后，这里会列出当前局面的候选落点。";
+    tr.innerHTML = `<td colspan="5">${text}</td>`;
+    candBody.appendChild(tr);
+    return;
+  }
   cands.forEach((c) => {
     const tr = document.createElement("tr");
     if (c.selected) tr.classList.add("best");
@@ -317,30 +502,52 @@ function svgEl(name, attrs = {}) {
 
 function renderTree() {
   treeSvg.innerHTML = "";
-  const tree = state.analysis && state.analysis.tree;
+  const context = activeAnalysisContext();
+  const a = context && context.analysis;
+  const tree = a && a.tree;
   const nodes = tree && tree.nodes ? tree.nodes : [];
   const edges = tree && tree.edges ? tree.edges : [];
+  treeTitle.textContent = context && context.type === "ai" ? "AI 上手搜索树" : "MCTS 搜索树";
+  treeCopy.textContent = context
+    ? context.type === "current"
+      ? "这棵树是当前局面的搜索摘要：主线表示 MCTS 最后最愿意继续展开的路线，旁枝表示它认真比较过的备选。"
+      : "这是 AI 上一手落子前的搜索快照：用来回看它为什么下那里，不要把它当成当前下一手建议。"
+    : "生成建议后，这里会显示当前局面的 MCTS 搜索树；也可以切到 AI 上手解释，回看它刚才的搜索。";
   treeCount.textContent = Math.max(0, nodes.length - 1);
+  treeDepth.textContent = nodes.length ? "深度 -" : "等待建议";
   treeSvg.setAttribute("aria-label", nodes.length
-    ? `MCTS 搜索树，显示 ${Math.max(0, nodes.length - 1)} 个已展开节点`
+    ? `${treeTitle.textContent}，显示 ${Math.max(0, nodes.length - 1)} 个已展开节点`
     : "MCTS 搜索树，尚无搜索数据");
 
   if (!nodes.length) {
     const text = svgEl("text", {
-      x: 380,
-      y: 150,
+      x: 420,
+      y: 160,
       class: "tree-empty",
       "text-anchor": "middle",
     });
-    text.textContent = "点击提示后显示搜索树";
+    const lines = hasFreshAiSearch()
+      ? ["当前没有建议树", "生成建议或解释 AI 上手"]
+      : ["还没有搜索树", "生成建议后显示 MCTS 摘要"];
+    lines.forEach((line, index) => {
+      const tspan = svgEl("tspan", {
+        x: 420,
+        dy: index === 0 ? 0 : 20,
+      });
+      tspan.textContent = line;
+      text.appendChild(tspan);
+    });
     treeSvg.appendChild(text);
     return;
   }
 
-  const width = 760;
-  const height = 320;
+  const width = 840;
+  const height = 380;
   const maxDepth = Math.max(...nodes.map((node) => node.depth));
-  const depthY = [30, 92, 150, 206, 258, 294];
+  const principalDepth = nodes.filter((node) => node.principal).length - 1;
+  treeDepth.textContent = `主线 ${Math.max(0, principalDepth)} 层 / 摘要 ${maxDepth} 层`;
+  const depthY = [34, 92, 150, 208, 266, 322, 356];
+  const depthLabels = ["当前", "候选落点", "回应", "再展开", "深层", "尾部", "末端"];
   const byDepth = new Map();
   nodes.forEach((node) => {
     if (!byDepth.has(node.depth)) byDepth.set(node.depth, []);
@@ -352,7 +559,7 @@ function renderTree() {
   if (root) positions.set(root.id, { x: width / 2, y: depthY[0] });
   const first = byDepth.get(1) || [];
   first.forEach((node, index) => {
-    const x = 54 + ((index + 1) / (first.length + 1)) * (width - 108);
+    const x = 74 + ((index + 1) / (first.length + 1)) * (width - 148);
     positions.set(node.id, { x, y: depthY[1] });
   });
 
@@ -365,7 +572,7 @@ function renderTree() {
     for (const [parentId, group] of byParent.entries()) {
       const parent = positions.get(parentId);
       if (!parent) continue;
-      const step = depth === 2 ? 34 : depth === 3 ? 22 : 15;
+      const step = depth === 2 ? 38 : depth === 3 ? 26 : depth === 4 ? 18 : 13;
       group.forEach((node, index) => {
         const spread = group.length === 1 ? 0 : (index - (group.length - 1) / 2) * step;
         positions.set(node.id, {
@@ -380,12 +587,19 @@ function renderTree() {
   const backdrop = svgEl("g", { class: "tree-backdrop" });
   depthY.slice(1, Math.min(maxDepth + 1, depthY.length)).forEach((y) => {
     backdrop.appendChild(svgEl("line", {
-      x1: 20,
+      x1: 26,
       y1: y.toFixed(1),
-      x2: (width - 20).toFixed(1),
+      x2: (width - 26).toFixed(1),
       y2: y.toFixed(1),
       class: "tree-depth-line",
     }));
+    const label = svgEl("text", {
+      x: 34,
+      y: (y - 8).toFixed(1),
+      class: "tree-depth-label",
+    });
+    label.textContent = depthLabels[depthY.indexOf(y)] || `第 ${depthY.indexOf(y)} 层`;
+    backdrop.appendChild(label);
   });
   treeSvg.appendChild(backdrop);
 
@@ -543,10 +757,13 @@ function renderChart() {
 
 function render(nextState) {
   state = nextState;
+  rememberAiSearch(state);
+  if (analysisFocus === "ai" && !hasFreshAiSearch()) analysisFocus = "current";
   if (!cells.length) buildBoard(state.size);
 
   renderBoard();
   renderEval();
+  renderRecommendation();
   renderCandidates();
   renderTree();
   renderHistory();
@@ -554,7 +771,7 @@ function render(nextState) {
 
   simValue.textContent = state.simulations;
   simSlider.value = Math.min(Math.max(state.simulations, simSlider.min), simSlider.max);
-  sideLabel.textContent = "执白";
+  sideLabel.textContent = state.humanPlayer === 1 ? "执黑" : "执白";
   statusPill.textContent = state.status;
   statusPill.className = `status-pill ${state.winner !== null ? "done" : ""}`;
   undoBtn.disabled = !state.canUndo || busy;
@@ -563,10 +780,12 @@ function render(nextState) {
 async function newGame() {
   try {
     setBusy(true, "新对局");
-    render(await callWorker("newGame", {
-      human: HUMAN_SIDE,
+    const nextState = await callWorker("newGame", {
+      human: selectedSide,
       simulations: Number(simSlider.value),
-    }));
+    });
+    resetAnalysisView();
+    render(nextState);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -580,11 +799,13 @@ async function makeMove(row, col) {
   if (state.board[row][col] !== 0) return;
   try {
     setBusy(true, "AI 思考中");
-    render(await callWorker("move", {
+    const nextState = await callWorker("move", {
       row,
       col,
       simulations: Number(simSlider.value),
-    }));
+    });
+    resetAnalysisView();
+    render(nextState);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -597,7 +818,9 @@ async function undo() {
   if (busy) return;
   try {
     setBusy(true, "悔棋");
-    render(await callWorker("undo"));
+    const nextState = await callWorker("undo");
+    resetAnalysisView();
+    render(nextState);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -609,6 +832,7 @@ async function undo() {
 async function analyze() {
   if (busy || !state || state.winner !== null) return;
   try {
+    analysisFocus = "current";
     setBusy(true, "生成提示");
     render(await callWorker("analyze", { simulations: Number(simSlider.value) }));
     if (overlayMode === "none") setOverlay("search");
@@ -620,16 +844,36 @@ async function analyze() {
   }
 }
 
+function toggleAiSearchExplanation() {
+  if (busy || !state) return;
+  if (analysisFocus === "ai") {
+    analysisFocus = "current";
+    if (!activeAnalysisContext()) overlayMode = "none";
+    syncOverlayButtons();
+    render(state);
+    return;
+  }
+  if (!hasFreshAiSearch()) {
+    showToast("还没有可解释的 AI 上一手");
+    return;
+  }
+  analysisFocus = "ai";
+  if (overlayMode === "none") overlayMode = "search";
+  syncOverlayButtons();
+  render(state);
+}
+
 function setOverlay(mode) {
   overlayMode = mode;
-  overlayButtons.forEach((b) => b.classList.toggle("active", b.dataset.overlay === mode));
+  syncOverlayButtons();
   if (state) renderBoard();
 }
 
 sideButtons.forEach((button) => {
   button.addEventListener("click", () => {
+    selectedSide = button.dataset.side;
     sideButtons.forEach((item) => item.classList.toggle("active", item === button));
-    sideLabel.textContent = "执白";
+    sideLabel.textContent = selectedSide === "black" ? "执黑" : "执白";
   });
 });
 
@@ -646,6 +890,8 @@ simSlider.addEventListener("input", () => {
 newGameBtn.addEventListener("click", newGame);
 undoBtn.addEventListener("click", undo);
 analyzeBtn.addEventListener("click", analyze);
+quickAnalyzeBtn.addEventListener("click", analyze);
+explainLastMoveBtn.addEventListener("click", toggleAiSearchExplanation);
 window.addEventListener("resize", () => {
   if (state) renderChart();
 });
@@ -654,12 +900,12 @@ async function boot() {
   try {
     setBusy(true, "加载模型");
     await callWorker("init");
-    loadBar.style.width = "100%";
+    loadBar.style.transform = "scaleX(1)";
     loadPercent.textContent = "100%";
-    loadText.textContent = "模型就绪";
-    loadLine.classList.add("ready");
+    loadText.textContent = "模型就绪，正在自动开局";
     setBusy(false);
     await newGame();
+    loadLine.classList.add("ready");
   } catch (error) {
     statusPill.textContent = "加载失败";
     statusPill.className = "status-pill done";
