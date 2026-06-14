@@ -425,6 +425,80 @@ function searchAnalysis(root, state, elapsedMs) {
   };
 }
 
+function stateKey(state) {
+  return [
+    state.movesPlayed,
+    state.currentPlayer,
+    state.lastMove === null ? "none" : state.lastMove,
+    state.winner === null ? "none" : state.winner,
+  ].join(":");
+}
+
+function terminalEvaluation(state, elapsedMs = 0) {
+  const blackWinProb = state.winner === 0 ? 0.5 : state.winner === 1 ? 1 : 0;
+  const currentWinProb = state.winner === 0 ? 0.5 : state.winner === state.currentPlayer ? 1 : 0;
+  return {
+    key: stateKey(state),
+    source: "terminal",
+    player: state.currentPlayer,
+    moveNumber: state.movesPlayed,
+    lastMove: state.lastMove,
+    winner: state.winner,
+    value: null,
+    winProb: currentWinProb,
+    blackWinProb,
+    elapsedMs,
+  };
+}
+
+function rootEvaluation(analysis, state, source = "mcts") {
+  const blackWinProb = analysis.player === 1 ? analysis.winProb : 1 - analysis.winProb;
+  return {
+    key: stateKey(state),
+    source,
+    player: state.currentPlayer,
+    moveNumber: state.movesPlayed,
+    lastMove: state.lastMove,
+    winner: state.winner,
+    value: analysis.rootValue,
+    winProb: state.currentPlayer === 1 ? blackWinProb : 1 - blackWinProb,
+    blackWinProb,
+    simulations: analysis.simulations,
+    elapsedMs: analysis.elapsedMs,
+  };
+}
+
+function childEvaluation(analysis, action, stateAfterMove) {
+  if (stateAfterMove.winner !== null) {
+    return {
+      ...terminalEvaluation(stateAfterMove, analysis.elapsedMs),
+      source: "mcts",
+      simulations: analysis.simulations,
+    };
+  }
+
+  const childQ = analysis.qMap && analysis.qMap[action] !== undefined
+    ? analysis.qMap[action]
+    : null;
+  if (childQ === null) return null;
+
+  const rootWinProb = (childQ + 1) / 2;
+  const blackWinProb = analysis.player === 1 ? rootWinProb : 1 - rootWinProb;
+  return {
+    key: stateKey(stateAfterMove),
+    source: "mcts",
+    player: stateAfterMove.currentPlayer,
+    moveNumber: stateAfterMove.movesPlayed,
+    lastMove: stateAfterMove.lastMove,
+    winner: stateAfterMove.winner,
+    value: stateAfterMove.currentPlayer === analysis.player ? childQ : -childQ,
+    winProb: stateAfterMove.currentPlayer === 1 ? blackWinProb : 1 - blackWinProb,
+    blackWinProb,
+    simulations: analysis.simulations,
+    elapsedMs: analysis.elapsedMs,
+  };
+}
+
 function buildSearchTree(root, state) {
   const nodes = [];
   const edges = [];
@@ -509,6 +583,7 @@ class GameSession {
     this.lastAnalysis = {};
     this.policySource = "none";
     this.policyPlayer = null;
+    this.evaluation = null;
     this.evalHistory = [];
     this.undoStack = [];
   }
@@ -524,6 +599,7 @@ class GameSession {
     this.lastAnalysis = {};
     this.policySource = "none";
     this.policyPlayer = null;
+    this.evaluation = null;
     this.evalHistory = [];
     this.undoStack = [];
     return this.playOpeningIfNeeded();
@@ -546,12 +622,14 @@ class GameSession {
       lastAnalysis: structuredClone(this.lastAnalysis),
       policySource: this.policySource,
       policyPlayer: this.policyPlayer,
+      evaluation: structuredClone(this.evaluation),
       evalHistory: this.evalHistory.map((e) => ({ ...e })),
     });
     this.state = this.state.apply(action);
     this.lastAnalysis = {};
     this.policySource = "none";
     this.policyPlayer = null;
+    this.evaluation = this.state.winner === null ? null : terminalEvaluation(this.state);
     this.history.push({ player: this.state.currentPlayer === -1 ? "black" : "white", source: "human", row, col });
     if (this.state.winner === null) await this.aiMove();
     return this.snapshot();
@@ -565,6 +643,7 @@ class GameSession {
     this.lastAnalysis = previous.lastAnalysis;
     this.policySource = previous.policySource;
     this.policyPlayer = previous.policyPlayer;
+    this.evaluation = previous.evaluation;
     this.evalHistory = previous.evalHistory;
     return this.snapshot();
   }
@@ -576,8 +655,38 @@ class GameSession {
     this.lastAnalysis = analysis;
     this.policySource = "analysis";
     this.policyPlayer = this.state.currentPlayer;
-    this.recordEval(analysis);
+    this.evaluation = rootEvaluation(analysis, this.state);
+    this.recordEval(this.evaluation);
     return this.snapshot();
+  }
+
+  async evaluateCurrent() {
+    const target = this.state.clone();
+    const start = performance.now();
+
+    if (target.winner !== null) {
+      const evaluation = terminalEvaluation(target);
+      this.evaluation = evaluation;
+      return evaluation;
+    } else {
+      const [evaluation] = await evaluateBatch([target]);
+      const currentWinProb = (evaluation.value + 1) / 2;
+      const blackWinProb = target.currentPlayer === 1 ? currentWinProb : 1 - currentWinProb;
+      const result = {
+        key: stateKey(target),
+        source: "model",
+        player: target.currentPlayer,
+        moveNumber: target.movesPlayed,
+        lastMove: target.lastMove,
+        winner: target.winner,
+        value: evaluation.value,
+        winProb: currentWinProb,
+        blackWinProb,
+        elapsedMs: performance.now() - start,
+      };
+      this.evaluation = result;
+      return result;
+    }
   }
 
   async aiMove() {
@@ -587,10 +696,12 @@ class GameSession {
     this.lastAnalysis = analysis;
     this.policySource = "ai_move";
     this.policyPlayer = player;
-    this.recordEval(analysis);
     const row = Math.floor(action / this.state.size);
     const col = action % this.state.size;
-    this.state = this.state.apply(action);
+    const nextState = this.state.apply(action);
+    this.evaluation = childEvaluation(analysis, action, nextState);
+    if (this.evaluation) this.recordEval(this.evaluation);
+    this.state = nextState;
     this.history.push({ player: player === 1 ? "black" : "white", source: "ai", row, col });
   }
 
@@ -600,12 +711,11 @@ class GameSession {
     return searchAnalysis(root, this.state, performance.now() - start);
   }
 
-  recordEval(analysis) {
-    if (!analysis) return;
-    const blackWinProb = analysis.player === 1 ? analysis.winProb : 1 - analysis.winProb;
-    const move = this.state.movesPlayed;
+  recordEval(evaluation) {
+    if (!evaluation) return;
+    const move = evaluation.moveNumber;
     this.evalHistory = this.evalHistory.filter((e) => e.move !== move);
-    this.evalHistory.push({ move, blackWinProb });
+    this.evalHistory.push({ move, blackWinProb: evaluation.blackWinProb });
   }
 
   snapshot() {
@@ -625,6 +735,7 @@ class GameSession {
       analysis: this.lastAnalysis,
       policySource: this.policySource,
       policyPlayer: this.policyPlayer,
+      evaluation: this.evaluation,
       evalHistory: this.evalHistory,
       simulations: this.simulations,
       canUndo: this.undoStack.length > 0,
@@ -717,6 +828,7 @@ self.addEventListener("message", async (event) => {
       else if (type === "move") result = await game.humanMove(payload.row, payload.col, payload.simulations);
       else if (type === "undo") result = game.undo();
       else if (type === "analyze") result = await game.analyze(payload.simulations);
+      else if (type === "evaluate") result = await game.evaluateCurrent();
       else throw new Error(`未知命令: ${type}`);
     }
     self.postMessage({ id, payload: result });

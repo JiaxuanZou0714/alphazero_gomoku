@@ -55,6 +55,8 @@ let overlayMode = "none";
 let busy = true;
 let cells = [];
 let requestId = 0;
+let evalRequestId = 0;
+let pendingEvalKey = null;
 let d3Tree = null;
 let d3TreeError = false;
 let d3TreePromise = null;
@@ -81,6 +83,16 @@ flowchart LR
 const playerName = (v) => (v === 1 ? "黑" : v === -1 ? "白" : "-");
 const pct = (v, digits = 0) => `${(v * 100).toFixed(digits)}%`;
 const moveText = (move) => (move ? `${move.row + 1},${move.col + 1}` : "-");
+
+function stateKey(s) {
+  if (!s) return "";
+  return [
+    s.movesPlayed,
+    s.currentPlayer,
+    s.lastMove === null ? "none" : s.lastMove,
+    s.winner === null ? "none" : s.winner,
+  ].join(":");
+}
 
 function simulationIndexFor(value) {
   let bestIndex = 0;
@@ -334,41 +346,48 @@ function paintOverlays() {
   }
 }
 
-function blackWinProb(a) {
-  if (!a || a.winProb === undefined) return null;
-  return a.player === 1 ? a.winProb : 1 - a.winProb;
-}
-
 function renderEval() {
-  const context = activeAnalysisContext();
-  const a = context && context.analysis;
-  const bw = blackWinProb(a);
+  const evaluation = state && state.evaluation;
+  const bw = evaluation ? evaluation.blackWinProb : null;
   if (bw === null) {
-    winProbEl.textContent = "-";
-    evalLabel.textContent = "-";
+    const pending = state && state.evaluationPending;
+    winProbEl.textContent = pending ? "..." : "-";
+    evalLabel.textContent = pending ? "..." : "-";
     evalBlack.style.transform = "scaleY(0.5)";
     winMeterBlack.style.transform = "scaleX(0.5)";
     if (state && state.winner !== null) {
       evalSource.textContent = "对局已结束。";
+    } else if (pending) {
+      evalSource.textContent = "模型实时评估中。";
     } else {
-      evalSource.textContent = "点“提示”后更新。";
+      evalSource.textContent = "模型就绪后自动更新。";
     }
-    statSims.textContent = "-";
+    statSims.textContent = pending ? "模型" : "-";
     statTime.textContent = "-";
   } else {
     winProbEl.textContent = pct(bw);
     evalLabel.textContent = pct(bw);
     evalBlack.style.transform = `scaleY(${bw.toFixed(3)})`;
     winMeterBlack.style.transform = `scaleX(${bw.toFixed(3)})`;
-    evalSource.textContent = `当前局面 · ${playerName(a.player)}方行棋`;
-    statSims.textContent = a.simulations;
-    statTime.textContent = a.elapsedMs >= 1000
-      ? `${(a.elapsedMs / 1000).toFixed(1)}s`
-      : `${Math.round(a.elapsedMs)}ms`;
+    if (evaluation.source === "terminal") {
+      evalSource.textContent = "终局结果。";
+      statSims.textContent = "终局";
+    } else if (evaluation.source === "mcts") {
+      evalSource.textContent = `复用 MCTS · ${playerName(evaluation.player)}方行棋`;
+      statSims.textContent = "MCTS";
+    } else {
+      evalSource.textContent = `模型实时 · ${playerName(evaluation.player)}方行棋`;
+      statSims.textContent = "模型";
+    }
+    statTime.textContent = evaluation.elapsedMs >= 1000
+      ? `${(evaluation.elapsedMs / 1000).toFixed(1)}s`
+      : `${Math.round(evaluation.elapsedMs)}ms`;
   }
   movesEl.textContent = state.movesPlayed;
   turnEl.textContent = state.winner !== null ? "-" : playerName(state.currentPlayer);
 
+  const context = activeAnalysisContext();
+  const a = context && context.analysis;
   if (!a || !a.visitMap) {
     overlayNote.textContent = "点“提示”后显示候选。";
   } else {
@@ -723,8 +742,47 @@ function renderHistory() {
   });
 }
 
+function applyEvaluation(evaluation) {
+  if (!state || evaluation.key !== stateKey(state)) return;
+  if (state.policySource === "analysis" && evaluation.source === "model") return;
+  state.evaluation = evaluation;
+  state.evaluationPending = false;
+  pendingEvalKey = null;
+  renderEval();
+}
+
+function requestLiveEvaluation() {
+  if (!state) return;
+  const key = stateKey(state);
+  if (state.evaluation && state.evaluation.key === key) return;
+  if (state.policySource === "analysis") return;
+  if (pendingEvalKey === key) return;
+
+  pendingEvalKey = key;
+  state.evaluationPending = true;
+  renderEval();
+  const id = ++evalRequestId;
+  callWorker("evaluate")
+    .then((evaluation) => {
+      if (id !== evalRequestId && evaluation.key !== stateKey(state)) return;
+      applyEvaluation(evaluation);
+    })
+    .catch((error) => {
+      if (pendingEvalKey === key && state && stateKey(state) === key) {
+        pendingEvalKey = null;
+        state.evaluationPending = false;
+        renderEval();
+      }
+      showToast(error.message || "局面评估失败");
+    });
+}
+
 function render(nextState) {
   state = nextState;
+  if (state.evaluation) {
+    state.evaluationPending = false;
+    pendingEvalKey = null;
+  }
   if (!cells.length) buildBoard(state.size);
 
   renderBoard();
@@ -741,6 +799,7 @@ function render(nextState) {
   statusPill.textContent = state.status;
   statusPill.className = `status-pill ${state.winner !== null ? "done" : ""}`;
   undoBtn.disabled = !state.canUndo || busy;
+  requestLiveEvaluation();
 }
 
 async function newGame() {
