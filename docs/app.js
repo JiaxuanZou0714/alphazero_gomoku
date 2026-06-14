@@ -218,9 +218,9 @@ function renderEval() {
   turnEl.textContent = state.winner !== null ? "-" : playerName(state.currentPlayer);
 
   if (!a || !a.visitMap) {
-    overlayNote.textContent = "搜索=实际模拟访问占比；先验=神经网络原始偏好";
+    overlayNote.textContent = "占比=深算时花在这个点上的比例；直觉=模型第一反应给它的分数";
   } else {
-    const src = state.policySource === "analysis" ? "当前局面分析" : "AI 上一手搜索";
+    const src = state.policySource === "analysis" ? "当前局面深算" : "AI 上一手深算";
     overlayNote.textContent = `${src} · ${a.simulations} sims`;
   }
 }

@@ -40,17 +40,17 @@
           <div class="overlay-toolbox">
             <div class="segmented overlay-seg" role="group" aria-label="叠加层">
               <button class="segment active" data-overlay="none" type="button">棋盘</button>
-              <button class="segment" data-overlay="search" type="button">搜索</button>
-              <button class="segment" data-overlay="prior" type="button">先验</button>
+              <button class="segment" data-overlay="search" type="button">深算</button>
+              <button class="segment" data-overlay="prior" type="button">直觉</button>
             </div>
             <p class="overlay-help">
-              搜索显示 MCTS 最后实际关注的位置；先验显示神经网络第一眼觉得该下哪里。
+              直觉是模型第一眼想下哪；深算是 MCTS 模拟很多后续之后真正重点比较的点。
             </p>
           </div>
           <label class="pv-toggle">
             <input id="pvToggle" type="checkbox" checked />
             <span>PV</span>
-            <small>主变化路线</small>
+            <small>AI 预计的后续路线</small>
           </label>
         </div>
       </section>
@@ -67,7 +67,7 @@
           </div>
 
           <label class="slider-row">
-            <span>搜索量</span>
+            <span>深算次数</span>
             <strong id="simValue">256</strong>
             <input id="simSlider" type="range" min="16" max="384" step="16" value="256" />
           </label>
@@ -92,7 +92,7 @@
           <dl>
             <div><dt>手数</dt><dd id="moves">0</dd></div>
             <div><dt>轮到</dt><dd id="turn">-</dd></div>
-            <div><dt>搜索</dt><dd id="statSims">-</dd></div>
+            <div><dt>深算</dt><dd id="statSims">-</dd></div>
             <div><dt>耗时</dt><dd id="statTime">-</dd></div>
           </dl>
           <p class="source" id="evalSource">-</p>
@@ -104,10 +104,10 @@
             <span>候选点</span>
             <strong id="policyCount">0</strong>
           </div>
-          <p class="source" id="overlayNote">搜索=实际模拟访问占比；先验=神经网络原始偏好</p>
+          <p class="source" id="overlayNote">占比=深算时花在这个点上的比例；直觉=模型第一反应给它的分数</p>
           <table>
             <thead>
-              <tr><th>点位</th><th>访问</th><th>占比</th><th>先验</th><th>胜率</th></tr>
+              <tr><th>点位</th><th>模拟</th><th>占比</th><th>直觉</th><th>胜率</th></tr>
             </thead>
             <tbody id="candBody"></tbody>
           </table>
