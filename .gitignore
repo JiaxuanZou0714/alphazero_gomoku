@@ -12,4 +12,5 @@ outputs/checkpoints/
 outputs/replay/
 outputs/logs/
 outputs/metrics/v2*.jsonl
+outputs/metrics/v3*.jsonl
 docs/assets/model/*.onnx

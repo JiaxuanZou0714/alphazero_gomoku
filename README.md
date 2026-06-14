@@ -131,6 +131,26 @@ outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt   (本地, 约 115 MB)
 
 它超过 GitHub 单文件 `100 MB` 硬限制，不随仓库提交（`outputs/checkpoints/` 已加入 `.gitignore`）。仓库内保留的 `gomoku10_iter_0030.pt` 是旧版架构的历史模型，仅作存档。
 
+### v2 失败实验
+
+`v2` 是一次从当前 best 继续训练的远端实验，目标是用更长训练和更低运行搜索预算超过旧 best。结果不成立：训练曲线在 `96 -> 112` 轮持续恶化（`loss` 上升、`policy_top1/value_acc` 下降、`policy_kl` 上升），实战复核也没有稳定超过旧 best。
+
+关键对战结果：
+
+```text
+v2 0101 vs old best: 9-7, score 0.5625
+v2 0112 vs old best: 8-8, score 0.5000
+v2 0096 vs old best: 6-10, score 0.3750
+v2 0096 vs v2 0101: 7-9, score 0.4375
+```
+
+因此 `v2` 判定为失败实验；`outputs/checkpoints/v2/gomoku10_best_selected.pt` 只代表 v2 内部低样本筛选结果，不代表全局最强。继续训练和部署默认仍以 `outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt` 为基准。v2 失败实验的曲线和筛选记录保存在：
+
+```text
+outputs/plots/v2-failed/
+outputs/metrics/v2-failed/
+```
+
 ## v3 训练复盘
 
 完整 100 轮训练中踩过并修复的问题，按影响排序：
@@ -187,6 +207,30 @@ replay 窗口为 `80k` 原始局面（约 50 轮）。注意 replay 现在只存
 
 配套语义：`gomoku10_best.pt` 在开启评估时只在候选真实晋升时更新（即始终指向 champion 一系的最强模型）；未开启评估时保持旧行为（跟踪最新 checkpoint）。
 
+## 使用本地 RTX 3080 启动 v3
+
+本地 `v3-local` 预设从 old best 继续训练，但比远端 A100 预设更保守：`48` 局/轮、`256` sims、`4` 个自我对弈 worker、`1024` batch、`50k` replay。评估每 5 轮运行一次，开启 `gate_evaluation`，候选打不过 champion 时会回滚，避免再次出现 v2 那种退化分支继续产出 checkpoint 的情况。
+
+```bat
+scripts\train_v3_local.cmd
+```
+
+也可以直接运行：
+
+```bash
+python -m alphazero_gomoku.train --preset v3-local
+```
+
+本地 v3 输出路径：
+
+```text
+outputs/checkpoints/v3-local/
+outputs/replay/v3-local_replay.pt
+outputs/metrics/v3-local.jsonl
+outputs/logs/v3_local_train.out.log
+outputs/logs/v3_local_train.err.log
+```
+
 从已有 checkpoint 继续训练（checkpoint 必须由相同网络架构配置产出；`gomoku10_best.pt` 等 v3 产物可直接 resume，仓库内存档的 `gomoku10_iter_0030.pt` 是旧版架构、不能用新预设 resume）：
 
 ```bash
@@ -213,12 +257,12 @@ python -m alphazero_gomoku.play \
 
 ## Benchmark lower search budgets
 
-Use this after a v2 checkpoint is available to check whether a smaller runtime
-search budget already beats the v1 baseline:
+Use this to verify whether a candidate checkpoint actually beats the current
+best at a target runtime search budget:
 
 ```bash
 python alphazero_gomoku/scripts/benchmark_checkpoints.py \
-  --candidate alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0100.pt \
+  --candidate alphazero_gomoku/outputs/checkpoints/v3-local/gomoku10_iter_0100.pt \
   --baseline alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt \
   --candidate-sims 128,256,512 \
   --baseline-sims 512 \
@@ -226,7 +270,8 @@ python alphazero_gomoku/scripts/benchmark_checkpoints.py \
   --device cuda
 ```
 
-The target for deployment is `v2 @ 128/256 sims >= v1 @ 512 sims`.
+Do not use loss curves alone to promote a checkpoint. The promotion signal is
+paired-opening head-to-head score against the current champion.
 
 ## 本地网页对弈
 
@@ -295,6 +340,14 @@ replay 在第 47 轮触及 `80k` 上限后开始滑动淘汰。`grad_norm` 在 @
 
 ```text
 outputs/plots/a100-4-prod-v3/metrics.csv
+```
+
+重新生成任意一次训练的曲线：
+
+```bash
+python alphazero_gomoku/scripts/plot_training_metrics.py \
+  --metrics alphazero_gomoku/outputs/metrics/v3-local.jsonl \
+  --out-dir alphazero_gomoku/outputs/plots/v3-local
 ```
 
 ## 测试

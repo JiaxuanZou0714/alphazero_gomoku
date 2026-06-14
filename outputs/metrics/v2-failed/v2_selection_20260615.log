@@ -1,0 +1,263 @@
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "checkpoints": 17, "device": "cuda:0", "event": "selection_start", "first": "gomoku10_iter_0096.pt", "last": "gomoku10_iter_0112.pt"}
+{"candidate": "gomoku10_iter_0096.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=19 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=8s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=baseline moves=21 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=19s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=baseline moves=12 wins=1 losses=2 draws=0 score_so_far=0.333 elapsed=21s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=1 losses=3 draws=0 score_so_far=0.250 elapsed=24s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=18 wins=1 losses=4 draws=0 score_so_far=0.200 elapsed=31s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=candidate moves=16 wins=2 losses=4 draws=0 score_so_far=0.333 elapsed=38s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=candidate moves=21 wins=3 losses=4 draws=0 score_so_far=0.429 elapsed=46s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=19 wins=3 losses=5 draws=0 score_so_far=0.375 elapsed=53s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0096.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 96, "losses": 5, "score": 0.375, "seconds": 53.60988661599913, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 53.76837886499925, "wins": 3}
+{"candidate": "gomoku10_iter_0097.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=25 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=12s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=baseline moves=23 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=26s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=13 wins=2 losses=1 draws=0 score_so_far=0.667 elapsed=29s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=2 losses=2 draws=0 score_so_far=0.500 elapsed=32s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=16 wins=2 losses=3 draws=0 score_so_far=0.400 elapsed=38s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=candidate moves=18 wins=3 losses=3 draws=0 score_so_far=0.500 elapsed=46s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=candidate moves=15 wins=4 losses=3 draws=0 score_so_far=0.571 elapsed=49s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=15 wins=4 losses=4 draws=0 score_so_far=0.500 elapsed=54s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0097.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 97, "losses": 4, "score": 0.5, "seconds": 54.979370450000715, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 55.15646674399977, "wins": 4}
+{"candidate": "gomoku10_iter_0098.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=21 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=9s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=candidate moves=10 wins=2 losses=0 draws=0 score_so_far=1.000 elapsed=12s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=19 wins=3 losses=0 draws=0 score_so_far=1.000 elapsed=20s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=3 losses=1 draws=0 score_so_far=0.750 elapsed=23s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=16 wins=3 losses=2 draws=0 score_so_far=0.600 elapsed=30s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=candidate moves=20 wins=4 losses=2 draws=0 score_so_far=0.667 elapsed=39s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=candidate moves=15 wins=5 losses=2 draws=0 score_so_far=0.714 elapsed=42s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=17 wins=5 losses=3 draws=0 score_so_far=0.625 elapsed=48s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0098.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 98, "losses": 3, "score": 0.625, "seconds": 48.064792399, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 48.2287137860003, "wins": 5}
+{"candidate": "gomoku10_iter_0099.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=19 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=9s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=candidate moves=10 wins=2 losses=0 draws=0 score_so_far=1.000 elapsed=12s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=13 wins=3 losses=0 draws=0 score_so_far=1.000 elapsed=15s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=3 losses=1 draws=0 score_so_far=0.750 elapsed=18s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=16 wins=3 losses=2 draws=0 score_so_far=0.600 elapsed=24s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=candidate moves=20 wins=4 losses=2 draws=0 score_so_far=0.667 elapsed=34s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=candidate moves=17 wins=5 losses=2 draws=0 score_so_far=0.714 elapsed=42s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=21 wins=5 losses=3 draws=0 score_so_far=0.625 elapsed=51s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0099.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 99, "losses": 3, "score": 0.625, "seconds": 51.209752609000134, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 51.370740338999894, "wins": 5}
+{"candidate": "gomoku10_iter_0100.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=27 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=12s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=candidate moves=10 wins=2 losses=0 draws=0 score_so_far=1.000 elapsed=15s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=23 wins=3 losses=0 draws=0 score_so_far=1.000 elapsed=23s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=3 losses=1 draws=0 score_so_far=0.750 elapsed=25s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=14 wins=3 losses=2 draws=0 score_so_far=0.600 elapsed=29s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=candidate moves=20 wins=4 losses=2 draws=0 score_so_far=0.667 elapsed=39s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=baseline moves=18 wins=4 losses=3 draws=0 score_so_far=0.571 elapsed=47s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=17 wins=4 losses=4 draws=0 score_so_far=0.500 elapsed=53s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0100.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 100, "losses": 4, "score": 0.5, "seconds": 53.226566550001735, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 53.38724823300072, "wins": 4}
+{"candidate": "gomoku10_iter_0101.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=17 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=6s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=baseline moves=19 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=14s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=27 wins=2 losses=1 draws=0 score_so_far=0.667 elapsed=26s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=2 losses=2 draws=0 score_so_far=0.500 elapsed=29s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=candidate moves=21 wins=3 losses=2 draws=0 score_so_far=0.600 elapsed=40s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=candidate moves=22 wins=4 losses=2 draws=0 score_so_far=0.667 elapsed=50s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=candidate moves=23 wins=5 losses=2 draws=0 score_so_far=0.714 elapsed=1m 00s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=candidate moves=22 wins=6 losses=2 draws=0 score_so_far=0.750 elapsed=1m 08s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0101.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 101, "losses": 2, "score": 0.75, "seconds": 68.3284521530004, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 68.48946181399879, "wins": 6}
+{"candidate": "gomoku10_iter_0102.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=21 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=9s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=candidate moves=16 wins=2 losses=0 draws=0 score_so_far=1.000 elapsed=18s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=baseline moves=20 wins=2 losses=1 draws=0 score_so_far=0.667 elapsed=24s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=2 losses=2 draws=0 score_so_far=0.500 elapsed=26s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=16 wins=2 losses=3 draws=0 score_so_far=0.400 elapsed=33s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=baseline moves=17 wins=2 losses=4 draws=0 score_so_far=0.333 elapsed=41s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=candidate moves=15 wins=3 losses=4 draws=0 score_so_far=0.429 elapsed=47s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=17 wins=3 losses=5 draws=0 score_so_far=0.375 elapsed=52s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0102.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 102, "losses": 5, "score": 0.375, "seconds": 52.943961501998274, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 53.103310524002154, "wins": 3}
+{"candidate": "gomoku10_iter_0103.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=baseline moves=18 wins=0 losses=1 draws=0 score_so_far=0.000 elapsed=6s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=baseline moves=19 wins=0 losses=2 draws=0 score_so_far=0.000 elapsed=16s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=13 wins=1 losses=2 draws=0 score_so_far=0.333 elapsed=18s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=23 wins=1 losses=3 draws=0 score_so_far=0.250 elapsed=25s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=16 wins=1 losses=4 draws=0 score_so_far=0.200 elapsed=32s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=baseline moves=19 wins=1 losses=5 draws=0 score_so_far=0.167 elapsed=43s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=baseline moves=24 wins=1 losses=6 draws=0 score_so_far=0.143 elapsed=54s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=15 wins=1 losses=7 draws=0 score_so_far=0.125 elapsed=1m 00s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0103.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 103, "losses": 7, "score": 0.125, "seconds": 60.95961308800179, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 61.1185333909998, "wins": 1}
+{"candidate": "gomoku10_iter_0104.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=17 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=6s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=candidate moves=16 wins=2 losses=0 draws=0 score_so_far=1.000 elapsed=16s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=23 wins=3 losses=0 draws=0 score_so_far=1.000 elapsed=22s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=3 losses=1 draws=0 score_so_far=0.750 elapsed=25s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=18 wins=3 losses=2 draws=0 score_so_far=0.600 elapsed=34s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=candidate moves=18 wins=4 losses=2 draws=0 score_so_far=0.667 elapsed=43s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=baseline moves=24 wins=4 losses=3 draws=0 score_so_far=0.571 elapsed=55s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=21 wins=4 losses=4 draws=0 score_so_far=0.500 elapsed=1m 04s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0104.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 104, "losses": 4, "score": 0.5, "seconds": 64.86307338500046, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 65.0285173150005, "wins": 4}
+{"candidate": "gomoku10_iter_0105.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=17 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=7s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=candidate moves=16 wins=2 losses=0 draws=0 score_so_far=1.000 elapsed=14s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=25 wins=3 losses=0 draws=0 score_so_far=1.000 elapsed=25s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=3 losses=1 draws=0 score_so_far=0.750 elapsed=29s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=candidate moves=17 wins=4 losses=1 draws=0 score_so_far=0.800 elapsed=36s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=baseline moves=17 wins=4 losses=2 draws=0 score_so_far=0.667 elapsed=45s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=candidate moves=13 wins=5 losses=2 draws=0 score_so_far=0.714 elapsed=47s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=17 wins=5 losses=3 draws=0 score_so_far=0.625 elapsed=53s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0105.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 105, "losses": 3, "score": 0.625, "seconds": 53.716267883999535, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 53.87391041799856, "wins": 5}
+{"candidate": "gomoku10_iter_0106.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=19 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=9s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=baseline moves=15 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=14s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=baseline moves=20 wins=1 losses=2 draws=0 score_so_far=0.333 elapsed=20s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=1 losses=3 draws=0 score_so_far=0.250 elapsed=23s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=16 wins=1 losses=4 draws=0 score_so_far=0.200 elapsed=29s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=baseline moves=13 wins=1 losses=5 draws=0 score_so_far=0.167 elapsed=35s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=baseline moves=12 wins=1 losses=6 draws=0 score_so_far=0.143 elapsed=38s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=15 wins=1 losses=7 draws=0 score_so_far=0.125 elapsed=43s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0106.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 106, "losses": 7, "score": 0.125, "seconds": 43.95325357399997, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 44.11732734000179, "wins": 1}
+{"candidate": "gomoku10_iter_0107.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=baseline moves=20 wins=0 losses=1 draws=0 score_so_far=0.000 elapsed=10s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=candidate moves=16 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=18s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=13 wins=2 losses=1 draws=0 score_so_far=0.667 elapsed=20s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=2 losses=2 draws=0 score_so_far=0.500 elapsed=22s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=16 wins=2 losses=3 draws=0 score_so_far=0.400 elapsed=32s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=baseline moves=19 wins=2 losses=4 draws=0 score_so_far=0.333 elapsed=42s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=candidate moves=15 wins=3 losses=4 draws=0 score_so_far=0.429 elapsed=45s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=25 wins=3 losses=5 draws=0 score_so_far=0.375 elapsed=55s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0107.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 107, "losses": 5, "score": 0.375, "seconds": 55.41928079199715, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 55.583096406997356, "wins": 3}
+{"candidate": "gomoku10_iter_0108.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=baseline moves=10 wins=0 losses=1 draws=0 score_so_far=0.000 elapsed=3s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=baseline moves=25 wins=0 losses=2 draws=0 score_so_far=0.000 elapsed=17s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=15 wins=1 losses=2 draws=0 score_so_far=0.333 elapsed=20s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=1 losses=3 draws=0 score_so_far=0.250 elapsed=23s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=candidate moves=23 wins=2 losses=3 draws=0 score_so_far=0.400 elapsed=34s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=baseline moves=19 wins=2 losses=4 draws=0 score_so_far=0.333 elapsed=45s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=baseline moves=16 wins=2 losses=5 draws=0 score_so_far=0.286 elapsed=52s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=candidate moves=16 wins=3 losses=5 draws=0 score_so_far=0.375 elapsed=1m 00s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0108.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 108, "losses": 5, "score": 0.375, "seconds": 60.61759371399967, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 60.783481083999504, "wins": 3}
+{"candidate": "gomoku10_iter_0109.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=baseline moves=24 wins=0 losses=1 draws=0 score_so_far=0.000 elapsed=15s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=candidate moves=18 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=20s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=15 wins=2 losses=1 draws=0 score_so_far=0.667 elapsed=23s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=2 losses=2 draws=0 score_so_far=0.500 elapsed=25s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=18 wins=2 losses=3 draws=0 score_so_far=0.400 elapsed=34s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=candidate moves=20 wins=3 losses=3 draws=0 score_so_far=0.500 elapsed=43s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=candidate moves=15 wins=4 losses=3 draws=0 score_so_far=0.571 elapsed=47s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=19 wins=4 losses=4 draws=0 score_so_far=0.500 elapsed=58s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0109.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 109, "losses": 4, "score": 0.5, "seconds": 58.698586212998634, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 58.86155328600216, "wins": 4}
+{"candidate": "gomoku10_iter_0110.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=21 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=8s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=baseline moves=15 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=14s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=17 wins=2 losses=1 draws=0 score_so_far=0.667 elapsed=20s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=candidate moves=12 wins=3 losses=1 draws=0 score_so_far=0.750 elapsed=23s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=22 wins=3 losses=2 draws=0 score_so_far=0.600 elapsed=30s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=baseline moves=17 wins=3 losses=3 draws=0 score_so_far=0.500 elapsed=41s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=baseline moves=24 wins=3 losses=4 draws=0 score_so_far=0.429 elapsed=53s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=baseline moves=19 wins=3 losses=5 draws=0 score_so_far=0.375 elapsed=1m 00s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0110.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 110, "losses": 5, "score": 0.375, "seconds": 60.87753080499897, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 61.043793150001875, "wins": 3}
+{"candidate": "gomoku10_iter_0111.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=19 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=10s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=baseline moves=19 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=23s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=baseline moves=20 wins=1 losses=2 draws=0 score_so_far=0.333 elapsed=30s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=15 wins=1 losses=3 draws=0 score_so_far=0.250 elapsed=34s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=baseline moves=18 wins=1 losses=4 draws=0 score_so_far=0.200 elapsed=42s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=candidate moves=22 wins=2 losses=4 draws=0 score_so_far=0.333 elapsed=54s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=baseline moves=24 wins=2 losses=5 draws=0 score_so_far=0.286 elapsed=1m 04s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=candidate moves=20 wins=3 losses=5 draws=0 score_so_far=0.375 elapsed=1m 13s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0111.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 111, "losses": 5, "score": 0.375, "seconds": 73.78298172599898, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 73.94779952400131, "wins": 3}
+{"candidate": "gomoku10_iter_0112.pt", "event": "match_start", "games": 8, "sims": 64, "stage": "screen64"}
+benchmark_game candidate_sims=64 baseline_sims=64 game=1/8 outcome=candidate moves=19 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=8s
+benchmark_game candidate_sims=64 baseline_sims=64 game=2/8 outcome=baseline moves=17 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=15s
+benchmark_game candidate_sims=64 baseline_sims=64 game=3/8 outcome=candidate moves=15 wins=2 losses=1 draws=0 score_so_far=0.667 elapsed=18s
+benchmark_game candidate_sims=64 baseline_sims=64 game=4/8 outcome=baseline moves=13 wins=2 losses=2 draws=0 score_so_far=0.500 elapsed=21s
+benchmark_game candidate_sims=64 baseline_sims=64 game=5/8 outcome=candidate moves=17 wins=3 losses=2 draws=0 score_so_far=0.600 elapsed=27s
+benchmark_game candidate_sims=64 baseline_sims=64 game=6/8 outcome=candidate moves=22 wins=4 losses=2 draws=0 score_so_far=0.667 elapsed=40s
+benchmark_game candidate_sims=64 baseline_sims=64 game=7/8 outcome=candidate moves=19 wins=5 losses=2 draws=0 score_so_far=0.714 elapsed=46s
+benchmark_game candidate_sims=64 baseline_sims=64 game=8/8 outcome=candidate moves=18 wins=6 losses=2 draws=0 score_so_far=0.750 elapsed=52s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0112.pt", "draws": 0, "event": "match_done", "games": 8, "iteration": 112, "losses": 2, "score": 0.75, "seconds": 52.87330673199904, "seed": 2026061501, "sims": 64, "stage": "screen64", "wall_seconds": 53.03673059100038, "wins": 6}
+{"event": "stage1_top", "top": [{"iteration": 112, "losses": 2, "score": 0.75, "wins": 6}, {"iteration": 101, "losses": 2, "score": 0.75, "wins": 6}, {"iteration": 105, "losses": 3, "score": 0.625, "wins": 5}, {"iteration": 99, "losses": 3, "score": 0.625, "wins": 5}, {"iteration": 98, "losses": 3, "score": 0.625, "wins": 5}]}
+{"candidate": "gomoku10_iter_0112.pt", "event": "match_start", "games": 16, "sims": 128, "stage": "final128"}
+benchmark_game candidate_sims=128 baseline_sims=128 game=1/16 outcome=baseline moves=20 wins=0 losses=1 draws=0 score_so_far=0.000 elapsed=17s
+benchmark_game candidate_sims=128 baseline_sims=128 game=2/16 outcome=baseline moves=19 wins=0 losses=2 draws=0 score_so_far=0.000 elapsed=35s
+benchmark_game candidate_sims=128 baseline_sims=128 game=3/16 outcome=baseline moves=18 wins=0 losses=3 draws=0 score_so_far=0.000 elapsed=49s
+benchmark_game candidate_sims=128 baseline_sims=128 game=4/16 outcome=baseline moves=19 wins=0 losses=4 draws=0 score_so_far=0.000 elapsed=1m 05s
+benchmark_game candidate_sims=128 baseline_sims=128 game=5/16 outcome=candidate moves=17 wins=1 losses=4 draws=0 score_so_far=0.200 elapsed=1m 17s
+benchmark_game candidate_sims=128 baseline_sims=128 game=6/16 outcome=baseline moves=23 wins=1 losses=5 draws=0 score_so_far=0.167 elapsed=1m 28s
+benchmark_game candidate_sims=128 baseline_sims=128 game=7/16 outcome=candidate moves=15 wins=2 losses=5 draws=0 score_so_far=0.286 elapsed=1m 49s
+benchmark_game candidate_sims=128 baseline_sims=128 game=8/16 outcome=candidate moves=24 wins=3 losses=5 draws=0 score_so_far=0.375 elapsed=2m 32s
+benchmark_game candidate_sims=128 baseline_sims=128 game=9/16 outcome=candidate moves=29 wins=4 losses=5 draws=0 score_so_far=0.444 elapsed=2m 59s
+benchmark_game candidate_sims=128 baseline_sims=128 game=10/16 outcome=candidate moves=18 wins=5 losses=5 draws=0 score_so_far=0.500 elapsed=3m 20s
+benchmark_game candidate_sims=128 baseline_sims=128 game=11/16 outcome=candidate moves=15 wins=6 losses=5 draws=0 score_so_far=0.545 elapsed=3m 31s
+benchmark_game candidate_sims=128 baseline_sims=128 game=12/16 outcome=baseline moves=11 wins=6 losses=6 draws=0 score_so_far=0.500 elapsed=3m 39s
+benchmark_game candidate_sims=128 baseline_sims=128 game=13/16 outcome=candidate moves=13 wins=7 losses=6 draws=0 score_so_far=0.538 elapsed=3m 48s
+benchmark_game candidate_sims=128 baseline_sims=128 game=14/16 outcome=baseline moves=19 wins=7 losses=7 draws=0 score_so_far=0.500 elapsed=4m 06s
+benchmark_game candidate_sims=128 baseline_sims=128 game=15/16 outcome=candidate moves=15 wins=8 losses=7 draws=0 score_so_far=0.533 elapsed=4m 20s
+benchmark_game candidate_sims=128 baseline_sims=128 game=16/16 outcome=baseline moves=13 wins=8 losses=8 draws=0 score_so_far=0.500 elapsed=4m 28s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0112.pt", "draws": 0, "event": "match_done", "games": 16, "iteration": 112, "losses": 8, "score": 0.5, "seconds": 268.4341868090014, "seed": 2026061502, "sims": 128, "stage": "final128", "wall_seconds": 268.5947471710024, "wins": 8}
+{"candidate": "gomoku10_iter_0101.pt", "event": "match_start", "games": 16, "sims": 128, "stage": "final128"}
+benchmark_game candidate_sims=128 baseline_sims=128 game=1/16 outcome=candidate moves=11 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=9s
+benchmark_game candidate_sims=128 baseline_sims=128 game=2/16 outcome=baseline moves=15 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=23s
+benchmark_game candidate_sims=128 baseline_sims=128 game=3/16 outcome=candidate moves=29 wins=2 losses=1 draws=0 score_so_far=0.667 elapsed=56s
+benchmark_game candidate_sims=128 baseline_sims=128 game=4/16 outcome=baseline moves=19 wins=2 losses=2 draws=0 score_so_far=0.500 elapsed=1m 14s
+benchmark_game candidate_sims=128 baseline_sims=128 game=5/16 outcome=candidate moves=15 wins=3 losses=2 draws=0 score_so_far=0.600 elapsed=1m 22s
+benchmark_game candidate_sims=128 baseline_sims=128 game=6/16 outcome=baseline moves=19 wins=3 losses=3 draws=0 score_so_far=0.500 elapsed=1m 33s
+benchmark_game candidate_sims=128 baseline_sims=128 game=7/16 outcome=candidate moves=19 wins=4 losses=3 draws=0 score_so_far=0.571 elapsed=2m 03s
+benchmark_game candidate_sims=128 baseline_sims=128 game=8/16 outcome=baseline moves=19 wins=4 losses=4 draws=0 score_so_far=0.500 elapsed=2m 28s
+benchmark_game candidate_sims=128 baseline_sims=128 game=9/16 outcome=candidate moves=15 wins=5 losses=4 draws=0 score_so_far=0.556 elapsed=2m 45s
+benchmark_game candidate_sims=128 baseline_sims=128 game=10/16 outcome=candidate moves=28 wins=6 losses=4 draws=0 score_so_far=0.600 elapsed=3m 18s
+benchmark_game candidate_sims=128 baseline_sims=128 game=11/16 outcome=candidate moves=17 wins=7 losses=4 draws=0 score_so_far=0.636 elapsed=3m 28s
+benchmark_game candidate_sims=128 baseline_sims=128 game=12/16 outcome=baseline moves=13 wins=7 losses=5 draws=0 score_so_far=0.583 elapsed=3m 39s
+benchmark_game candidate_sims=128 baseline_sims=128 game=13/16 outcome=candidate moves=13 wins=8 losses=5 draws=0 score_so_far=0.615 elapsed=3m 48s
+benchmark_game candidate_sims=128 baseline_sims=128 game=14/16 outcome=baseline moves=19 wins=8 losses=6 draws=0 score_so_far=0.571 elapsed=4m 09s
+benchmark_game candidate_sims=128 baseline_sims=128 game=15/16 outcome=candidate moves=27 wins=9 losses=6 draws=0 score_so_far=0.600 elapsed=4m 49s
+benchmark_game candidate_sims=128 baseline_sims=128 game=16/16 outcome=baseline moves=11 wins=9 losses=7 draws=0 score_so_far=0.562 elapsed=4m 55s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0101.pt", "draws": 0, "event": "match_done", "games": 16, "iteration": 101, "losses": 7, "score": 0.5625, "seconds": 295.9866374089979, "seed": 2026061502, "sims": 128, "stage": "final128", "wall_seconds": 296.1460593919983, "wins": 9}
+{"candidate": "gomoku10_iter_0105.pt", "event": "match_start", "games": 16, "sims": 128, "stage": "final128"}
+benchmark_game candidate_sims=128 baseline_sims=128 game=1/16 outcome=candidate moves=11 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=6s
+benchmark_game candidate_sims=128 baseline_sims=128 game=2/16 outcome=baseline moves=21 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=22s
+benchmark_game candidate_sims=128 baseline_sims=128 game=3/16 outcome=candidate moves=21 wins=2 losses=1 draws=0 score_so_far=0.667 elapsed=41s
+benchmark_game candidate_sims=128 baseline_sims=128 game=4/16 outcome=baseline moves=21 wins=2 losses=2 draws=0 score_so_far=0.500 elapsed=1m 01s
+benchmark_game candidate_sims=128 baseline_sims=128 game=5/16 outcome=candidate moves=13 wins=3 losses=2 draws=0 score_so_far=0.600 elapsed=1m 06s
+benchmark_game candidate_sims=128 baseline_sims=128 game=6/16 outcome=baseline moves=23 wins=3 losses=3 draws=0 score_so_far=0.500 elapsed=1m 19s
+benchmark_game candidate_sims=128 baseline_sims=128 game=7/16 outcome=baseline moves=30 wins=3 losses=4 draws=0 score_so_far=0.429 elapsed=2m 02s
+benchmark_game candidate_sims=128 baseline_sims=128 game=8/16 outcome=candidate moves=16 wins=4 losses=4 draws=0 score_so_far=0.500 elapsed=2m 17s
+benchmark_game candidate_sims=128 baseline_sims=128 game=9/16 outcome=baseline moves=18 wins=4 losses=5 draws=0 score_so_far=0.444 elapsed=2m 34s
+benchmark_game candidate_sims=128 baseline_sims=128 game=10/16 outcome=baseline moves=15 wins=4 losses=6 draws=0 score_so_far=0.400 elapsed=2m 45s
+benchmark_game candidate_sims=128 baseline_sims=128 game=11/16 outcome=baseline moves=16 wins=4 losses=7 draws=0 score_so_far=0.364 elapsed=3m 06s
+benchmark_game candidate_sims=128 baseline_sims=128 game=12/16 outcome=baseline moves=25 wins=4 losses=8 draws=0 score_so_far=0.333 elapsed=3m 28s
+benchmark_game candidate_sims=128 baseline_sims=128 game=13/16 outcome=baseline moves=16 wins=4 losses=9 draws=0 score_so_far=0.308 elapsed=3m 59s
+benchmark_game candidate_sims=128 baseline_sims=128 game=14/16 outcome=baseline moves=19 wins=4 losses=10 draws=0 score_so_far=0.286 elapsed=4m 32s
+benchmark_game candidate_sims=128 baseline_sims=128 game=15/16 outcome=candidate moves=21 wins=5 losses=10 draws=0 score_so_far=0.333 elapsed=4m 49s
+benchmark_game candidate_sims=128 baseline_sims=128 game=16/16 outcome=baseline moves=13 wins=5 losses=11 draws=0 score_so_far=0.312 elapsed=4m 56s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0105.pt", "draws": 0, "event": "match_done", "games": 16, "iteration": 105, "losses": 11, "score": 0.3125, "seconds": 296.7840293720001, "seed": 2026061502, "sims": 128, "stage": "final128", "wall_seconds": 296.9342587710016, "wins": 5}
+{"candidate": "gomoku10_iter_0099.pt", "event": "match_start", "games": 16, "sims": 128, "stage": "final128"}
+benchmark_game candidate_sims=128 baseline_sims=128 game=1/16 outcome=candidate moves=13 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=11s
+benchmark_game candidate_sims=128 baseline_sims=128 game=2/16 outcome=baseline moves=17 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=28s
+benchmark_game candidate_sims=128 baseline_sims=128 game=3/16 outcome=candidate moves=21 wins=2 losses=1 draws=0 score_so_far=0.667 elapsed=43s
+benchmark_game candidate_sims=128 baseline_sims=128 game=4/16 outcome=baseline moves=21 wins=2 losses=2 draws=0 score_so_far=0.500 elapsed=1m 02s
+benchmark_game candidate_sims=128 baseline_sims=128 game=5/16 outcome=candidate moves=17 wins=3 losses=2 draws=0 score_so_far=0.600 elapsed=1m 12s
+benchmark_game candidate_sims=128 baseline_sims=128 game=6/16 outcome=baseline moves=21 wins=3 losses=3 draws=0 score_so_far=0.500 elapsed=1m 23s
+benchmark_game candidate_sims=128 baseline_sims=128 game=7/16 outcome=baseline moves=22 wins=3 losses=4 draws=0 score_so_far=0.429 elapsed=1m 44s
+benchmark_game candidate_sims=128 baseline_sims=128 game=8/16 outcome=candidate moves=12 wins=4 losses=4 draws=0 score_so_far=0.500 elapsed=1m 55s
+benchmark_game candidate_sims=128 baseline_sims=128 game=9/16 outcome=baseline moves=32 wins=4 losses=5 draws=0 score_so_far=0.444 elapsed=2m 40s
+benchmark_game candidate_sims=128 baseline_sims=128 game=10/16 outcome=candidate moves=18 wins=5 losses=5 draws=0 score_so_far=0.500 elapsed=3m 02s
+benchmark_game candidate_sims=128 baseline_sims=128 game=11/16 outcome=candidate moves=19 wins=6 losses=5 draws=0 score_so_far=0.545 elapsed=3m 20s
+benchmark_game candidate_sims=128 baseline_sims=128 game=12/16 outcome=baseline moves=11 wins=6 losses=6 draws=0 score_so_far=0.500 elapsed=3m 27s
+benchmark_game candidate_sims=128 baseline_sims=128 game=13/16 outcome=baseline moves=22 wins=6 losses=7 draws=0 score_so_far=0.462 elapsed=4m 16s
+benchmark_game candidate_sims=128 baseline_sims=128 game=14/16 outcome=candidate moves=16 wins=7 losses=7 draws=0 score_so_far=0.500 elapsed=4m 42s
+benchmark_game candidate_sims=128 baseline_sims=128 game=15/16 outcome=baseline moves=22 wins=7 losses=8 draws=0 score_so_far=0.467 elapsed=5m 05s
+benchmark_game candidate_sims=128 baseline_sims=128 game=16/16 outcome=baseline moves=11 wins=7 losses=9 draws=0 score_so_far=0.438 elapsed=5m 11s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0099.pt", "draws": 0, "event": "match_done", "games": 16, "iteration": 99, "losses": 9, "score": 0.4375, "seconds": 311.660349234, "seed": 2026061502, "sims": 128, "stage": "final128", "wall_seconds": 311.81671120900137, "wins": 7}
+{"candidate": "gomoku10_iter_0098.pt", "event": "match_start", "games": 16, "sims": 128, "stage": "final128"}
+benchmark_game candidate_sims=128 baseline_sims=128 game=1/16 outcome=candidate moves=11 wins=1 losses=0 draws=0 score_so_far=1.000 elapsed=6s
+benchmark_game candidate_sims=128 baseline_sims=128 game=2/16 outcome=baseline moves=17 wins=1 losses=1 draws=0 score_so_far=0.500 elapsed=23s
+benchmark_game candidate_sims=128 baseline_sims=128 game=3/16 outcome=candidate moves=21 wins=2 losses=1 draws=0 score_so_far=0.667 elapsed=49s
+benchmark_game candidate_sims=128 baseline_sims=128 game=4/16 outcome=baseline moves=23 wins=2 losses=2 draws=0 score_so_far=0.500 elapsed=1m 12s
+benchmark_game candidate_sims=128 baseline_sims=128 game=5/16 outcome=candidate moves=11 wins=3 losses=2 draws=0 score_so_far=0.600 elapsed=1m 16s
+benchmark_game candidate_sims=128 baseline_sims=128 game=6/16 outcome=baseline moves=29 wins=3 losses=3 draws=0 score_so_far=0.500 elapsed=1m 44s
+benchmark_game candidate_sims=128 baseline_sims=128 game=7/16 outcome=candidate moves=15 wins=4 losses=3 draws=0 score_so_far=0.571 elapsed=1m 59s
+benchmark_game candidate_sims=128 baseline_sims=128 game=8/16 outcome=candidate moves=12 wins=5 losses=3 draws=0 score_so_far=0.625 elapsed=2m 09s
+benchmark_game candidate_sims=128 baseline_sims=128 game=9/16 outcome=baseline moves=26 wins=5 losses=4 draws=0 score_so_far=0.556 elapsed=2m 47s
+benchmark_game candidate_sims=128 baseline_sims=128 game=10/16 outcome=baseline moves=19 wins=5 losses=5 draws=0 score_so_far=0.500 elapsed=3m 03s
+benchmark_game candidate_sims=128 baseline_sims=128 game=11/16 outcome=candidate moves=17 wins=6 losses=5 draws=0 score_so_far=0.545 elapsed=3m 13s
+benchmark_game candidate_sims=128 baseline_sims=128 game=12/16 outcome=baseline moves=19 wins=6 losses=6 draws=0 score_so_far=0.500 elapsed=3m 29s
+benchmark_game candidate_sims=128 baseline_sims=128 game=13/16 outcome=baseline moves=16 wins=6 losses=7 draws=0 score_so_far=0.462 elapsed=3m 50s
+benchmark_game candidate_sims=128 baseline_sims=128 game=14/16 outcome=baseline moves=21 wins=6 losses=8 draws=0 score_so_far=0.429 elapsed=4m 23s
+benchmark_game candidate_sims=128 baseline_sims=128 game=15/16 outcome=candidate moves=23 wins=7 losses=8 draws=0 score_so_far=0.467 elapsed=4m 47s
+benchmark_game candidate_sims=128 baseline_sims=128 game=16/16 outcome=baseline moves=21 wins=7 losses=9 draws=0 score_so_far=0.438 elapsed=5m 15s
+{"baseline": "/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt", "candidate": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0098.pt", "draws": 0, "event": "match_done", "games": 16, "iteration": 98, "losses": 9, "score": 0.4375, "seconds": 315.2340200619983, "seed": 2026061502, "sims": 128, "stage": "final128", "wall_seconds": 315.3899823569991, "wins": 7}
+{"draws": 0, "event": "selection_done", "losses": 7, "score": 0.5625, "selected_checkpoint": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0101.pt", "selected_copy": "/home/featurize/alphazero_gomoku/outputs/checkpoints/v2/gomoku10_best_selected.pt", "selected_iteration": 101, "summary": "/home/featurize/alphazero_gomoku/outputs/metrics/v2_selection_summary.json", "wins": 9}

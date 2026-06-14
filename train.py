@@ -285,6 +285,61 @@ def preset_config(name: str) -> TrainConfig:
         cfg.promotion_threshold = 0.55
         cfg.early_stop_evals = 4
         return cfg
+    if name == "v3-local":
+        cfg.iterations = 40
+        cfg.games_per_iteration = 48
+        cfg.simulations = 256
+        cfg.mcts_batch_size = 32
+        cfg.epochs = 3
+        cfg.train_steps_per_iteration = 64
+        cfg.batch_size = 1024
+        cfg.replay_size = 50_000
+        cfg.learning_rate = 4.0e-5
+        cfg.min_learning_rate = 8.0e-6
+        cfg.lr_schedule = "cosine"
+        cfg.warmup_iterations = 2
+        cfg.weight_decay = 1.0e-4
+        cfg.max_grad_norm = 10.0
+        cfg.temperature_moves = 12
+        cfg.mcts_c_puct = 1.25
+        cfg.mcts_dirichlet_alpha = 0.15
+        cfg.channels = 192
+        cfg.residual_blocks = 12
+        cfg.policy_channels = 16
+        cfg.value_channels = 8
+        cfg.value_hidden = 512
+        cfg.use_global_pool = True
+        cfg.use_soft_policy = True
+        cfg.soft_policy_loss_weight = 4.0
+        cfg.value_loss_weight = 1.5
+        cfg.surprise_weighting = True
+        cfg.mcts_value_weight = 0.5
+        cfg.mcts_root_policy_temp = 1.1
+        cfg.mcts_shaped_dirichlet = True
+        cfg.mcts_dynamic_cpuct = True
+        cfg.mcts_fpu_reduction = 0.2
+        cfg.mcts_forced_playouts = True
+        cfg.playout_cap_randomization = True
+        cfg.full_search_prob = 0.50
+        cfg.fast_simulations = 64
+        cfg.checkpoint_dir = "alphazero_gomoku/outputs/checkpoints/v3-local"
+        cfg.replay_path = "alphazero_gomoku/outputs/replay/v3-local_replay.pt"
+        cfg.replay_save_interval = 2
+        cfg.metrics_path = "alphazero_gomoku/outputs/metrics/v3-local.jsonl"
+        cfg.resume = "alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt"
+        cfg.self_play_workers = 4
+        cfg.self_play_devices = "auto"
+        cfg.data_parallel = False
+        cfg.eval_interval = 5
+        cfg.eval_games = 16
+        cfg.eval_simulations = 256
+        cfg.eval_opening_moves = 4
+        cfg.eval_progress_interval = 1
+        cfg.eval_early_cutoff = True
+        cfg.promotion_threshold = 0.55
+        cfg.gate_evaluation = True
+        cfg.early_stop_evals = 3
+        return cfg
     if name == "a100-4":
         cfg.iterations = 100
         cfg.games_per_iteration = 96
@@ -1650,7 +1705,7 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--preset",
-        choices=["local", "v2", "a100-4", "a100-fast", "a100-turbo", "a100-prod"],
+        choices=["local", "v2", "v3-local", "a100-4", "a100-fast", "a100-turbo", "a100-prod"],
         default=defaults.preset,
     )
     parser.add_argument("--board-size", type=int, default=defaults.board_size)
@@ -1769,7 +1824,7 @@ def main() -> None:
     preset_parser = argparse.ArgumentParser(add_help=False)
     preset_parser.add_argument(
         "--preset",
-        choices=["local", "v2", "a100-4", "a100-fast", "a100-turbo", "a100-prod"],
+        choices=["local", "v2", "v3-local", "a100-4", "a100-fast", "a100-turbo", "a100-prod"],
         default="local",
     )
     preset_args, _ = preset_parser.parse_known_args()
