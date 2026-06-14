@@ -12,7 +12,7 @@
         <div class="topbar">
           <div>
             <p class="eyebrow">10x10 Gomoku · Browser AlphaZero</p>
-            <h1>AlphaZero 五子棋 <span>静态版</span></h1>
+            <h1>AlphaZero 五子棋</h1>
           </div>
           <div class="status-pill loading" id="statusPill">加载模型</div>
         </div>
@@ -37,14 +37,20 @@
         </div>
 
         <div class="overlay-controls">
-          <div class="segmented overlay-seg" role="group" aria-label="叠加层">
-            <button class="segment active" data-overlay="none" type="button">棋盘</button>
-            <button class="segment" data-overlay="search" type="button">搜索</button>
-            <button class="segment" data-overlay="prior" type="button">先验</button>
+          <div class="overlay-toolbox">
+            <div class="segmented overlay-seg" role="group" aria-label="叠加层">
+              <button class="segment active" data-overlay="none" type="button">棋盘</button>
+              <button class="segment" data-overlay="search" type="button">搜索</button>
+              <button class="segment" data-overlay="prior" type="button">先验</button>
+            </div>
+            <p class="overlay-help">
+              搜索显示 MCTS 最后实际关注的位置；先验显示神经网络第一眼觉得该下哪里。
+            </p>
           </div>
           <label class="pv-toggle">
             <input id="pvToggle" type="checkbox" checked />
             <span>PV</span>
+            <small>主变化路线</small>
           </label>
         </div>
       </section>
@@ -52,7 +58,7 @@
       <aside class="side-pane">
         <section class="panel controls">
           <div class="panel-title">
-            <span>对局</span>
+            <span>对局设置</span>
             <strong id="sideLabel">执黑</strong>
           </div>
           <div class="segmented" role="group" aria-label="执棋">
@@ -78,6 +84,11 @@
             <span>局面评估</span>
             <strong id="winProb">-</strong>
           </div>
+          <div class="win-meter" aria-hidden="true">
+            <span class="meter-label black">黑</span>
+            <div class="meter-track"><span id="winMeterBlack"></span></div>
+            <span class="meter-label white">白</span>
+          </div>
           <dl>
             <div><dt>手数</dt><dd id="moves">0</dd></div>
             <div><dt>轮到</dt><dd id="turn">-</dd></div>
@@ -93,7 +104,7 @@
             <span>候选点</span>
             <strong id="policyCount">0</strong>
           </div>
-          <p class="source" id="overlayNote">-</p>
+          <p class="source" id="overlayNote">搜索=实际模拟访问占比；先验=神经网络原始偏好</p>
           <table>
             <thead>
               <tr><th>点位</th><th>访问</th><th>占比</th><th>先验</th><th>胜率</th></tr>

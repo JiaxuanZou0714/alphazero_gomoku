@@ -19,6 +19,7 @@ const pvToggle = document.querySelector("#pvToggle");
 const overlayNote = document.querySelector("#overlayNote");
 const evalBlack = document.querySelector("#evalBlack");
 const evalLabel = document.querySelector("#evalLabel");
+const winMeterBlack = document.querySelector("#winMeterBlack");
 const winProbEl = document.querySelector("#winProb");
 const evalSource = document.querySelector("#evalSource");
 const statSims = document.querySelector("#statSims");
@@ -196,6 +197,7 @@ function renderEval() {
     winProbEl.textContent = "-";
     evalLabel.textContent = "-";
     evalBlack.style.height = "50%";
+    winMeterBlack.style.width = "50%";
     evalSource.textContent = "-";
     statSims.textContent = "-";
     statTime.textContent = "-";
@@ -203,6 +205,7 @@ function renderEval() {
     winProbEl.textContent = pct(bw);
     evalLabel.textContent = pct(bw);
     evalBlack.style.height = `${(bw * 100).toFixed(1)}%`;
+    winMeterBlack.style.width = `${(bw * 100).toFixed(1)}%`;
     evalSource.textContent = state.policySource === "analysis"
       ? `当前局面 · ${playerName(a.player)}方行棋`
       : `AI 第 ${a.moveNumber + 1} 手搜索`;
@@ -215,7 +218,7 @@ function renderEval() {
   turnEl.textContent = state.winner !== null ? "-" : playerName(state.currentPlayer);
 
   if (!a || !a.visitMap) {
-    overlayNote.textContent = "尚无分析数据";
+    overlayNote.textContent = "搜索=实际模拟访问占比；先验=神经网络原始偏好";
   } else {
     const src = state.policySource === "analysis" ? "当前局面分析" : "AI 上一手搜索";
     overlayNote.textContent = `${src} · ${a.simulations} sims`;
@@ -231,10 +234,11 @@ function renderCandidates() {
     const tr = document.createElement("tr");
     if (c.selected) tr.classList.add("best");
     const win = c.q === null ? null : (c.q + 1) / 2;
+    const shareWidth = Math.max(2, Math.min(100, c.share * 100)).toFixed(1);
     tr.innerHTML = `
       <td>${c.selected ? "✓ " : ""}${c.row + 1},${c.col + 1}</td>
       <td>${c.visits}</td>
-      <td>${pct(c.share)}</td>
+      <td><span class="share-cell" style="--share:${shareWidth}%"><span>${pct(c.share)}</span></span></td>
       <td>${pct(c.prior, 1)}</td>
       <td class="${win === null ? "" : win >= 0.5 ? "q-good" : "q-bad"}">
         ${win === null ? "-" : pct(win)}</td>`;
