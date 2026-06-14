@@ -73,6 +73,21 @@ class MCTS:
         # reproducible (tie-breaks and Dirichlet noise included).
         self.rng = rng or random.Random(random.getrandbits(64))
         self.np_rng = np.random.default_rng(self.rng.getrandbits(64))
+        self.eval_cache: dict[
+            tuple[int, int, tuple[int, ...], bytes, float], tuple[np.ndarray, float]
+        ] = {}
+
+    @staticmethod
+    def _eval_cache_key(
+        state: GomokuState, policy_temperature: float
+    ) -> tuple[int, int, tuple[int, ...], bytes, float]:
+        return (
+            state.current_player,
+            state.win_length,
+            tuple(state.board.shape),
+            state.board.tobytes(),
+            float(policy_temperature),
+        )
 
     def search(
         self,
@@ -223,13 +238,34 @@ class MCTS:
         if not states:
             return []
 
+        policy_temperature = self.config.root_policy_temp if apply_root_temp else 1.0
+        if policy_temperature <= 0:
+            policy_temperature = 1.0
+
+        results: list[tuple[np.ndarray, float] | None] = [None] * len(states)
+        missing_states: list[GomokuState] = []
+        missing_indices: list[int] = []
+        missing_keys: list[tuple[int, int, tuple[int, ...], bytes, float]] = []
+        for index, state in enumerate(states):
+            key = self._eval_cache_key(state, policy_temperature)
+            cached = self.eval_cache.get(key)
+            if cached is not None:
+                results[index] = cached
+            else:
+                missing_states.append(state)
+                missing_indices.append(index)
+                missing_keys.append(key)
+
+        if not missing_states:
+            return [result for result in results if result is not None]
+
         self.model.eval()
         encoded = tensor_from_array(
-            np.stack([state.encode() for state in states]),
+            np.stack([state.encode() for state in missing_states]),
             dtype=torch.float32,
             device=self.device,
         )
-        legal_masks_np = np.stack([state.legal_mask() for state in states])  # (N, A)
+        legal_masks_np = np.stack([state.legal_mask() for state in missing_states])  # (N, A)
 
         autocast_ctx = self._autocast_context()
         with torch.inference_mode(), autocast_ctx:
@@ -242,9 +278,8 @@ class MCTS:
             ).clamp(-1.0, 1.0).cpu().tolist()
 
         # Apply root policy temperature to flatten overconfident priors
-        temp = self.config.root_policy_temp
-        if apply_root_temp and temp != 1.0 and temp > 0:
-            logits_np /= temp
+        if policy_temperature != 1.0:
+            logits_np /= policy_temperature
 
         # Masked softmax in numpy (vectorised)
         logits_np[~legal_masks_np] = -1.0e9
@@ -255,7 +290,12 @@ class MCTS:
         uniform_fallback = legal_masks_np.sum(axis=1, keepdims=True).clip(min=1)
         probs_batch = np.where(totals > 0, exp / totals, legal_masks_np / uniform_fallback)
 
-        return [(probs_batch[i].astype(np.float32), float(values[i])) for i in range(len(states))]
+        for index, key, probs, value in zip(missing_indices, missing_keys, probs_batch, values):
+            result = (probs.astype(np.float32), float(value))
+            self.eval_cache[key] = result
+            results[index] = result
+
+        return [result for result in results if result is not None]
 
     def _autocast_context(self) -> object:
         if self.device.type != "cuda" or self.config.amp_dtype == "none":

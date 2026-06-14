@@ -23,6 +23,16 @@ class UniformNet(torch.nn.Module):
         return torch.zeros(n, self.action_size), None, torch.zeros(n)
 
 
+class CountingNet(UniformNet):
+    def __init__(self, action_size: int = 100) -> None:
+        super().__init__(action_size=action_size)
+        self.positions_evaluated = 0
+
+    def forward(self, x: torch.Tensor):
+        self.positions_evaluated += int(x.shape[0])
+        return super().forward(x)
+
+
 def winning_position() -> GomokuState:
     """Black has an open four at (0,0)-(0,3); black to move wins at (0,4)."""
     board = np.zeros((10, 10), dtype=np.int8)
@@ -51,6 +61,21 @@ class MCTSTest(unittest.TestCase):
         target = mcts.policy_target(root, state.action_size)
         self.assertAlmostEqual(float(target.sum()), 1.0, places=5)
         self.assertGreaterEqual(target.min(), 0.0)
+
+    def test_evaluate_batch_reuses_cached_network_results(self) -> None:
+        state = GomokuState.new(size=10)
+        net = CountingNet()
+        cfg = MCTSConfig(root_policy_temp=1.2)
+        mcts = MCTS(net, cfg, device="cpu")
+
+        first = mcts._evaluate_batch([state], apply_root_temp=True)
+        second = mcts._evaluate_batch([state], apply_root_temp=True)
+        self.assertEqual(net.positions_evaluated, 1)
+        np.testing.assert_allclose(first[0][0], second[0][0])
+        self.assertEqual(first[0][1], second[0][1])
+
+        mcts._evaluate_batch([state], apply_root_temp=False)
+        self.assertEqual(net.positions_evaluated, 2)
 
     def test_policy_target_pruning_keeps_best_move(self) -> None:
         state = winning_position()
