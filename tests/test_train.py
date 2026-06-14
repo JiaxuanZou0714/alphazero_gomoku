@@ -140,6 +140,20 @@ class EvaluationTest(unittest.TestCase):
         self.assertGreaterEqual(result["win_rate"], 0.0)
         self.assertLessEqual(result["win_rate"], 1.0)
 
+    def test_eval_early_cutoff_stops_impossible_match(self) -> None:
+        torch.manual_seed(0)
+        cfg = TrainConfig(
+            eval_games=4,
+            eval_simulations=2,
+            eval_opening_moves=0,
+            eval_early_cutoff=True,
+            promotion_threshold=2.0,
+        )
+        cfg.device = "cpu"
+        result = evaluate_candidate(tiny_model(), tiny_model(), cfg, rng=random.Random(7))
+        self.assertLess(result["games"], float(cfg.eval_games))
+        self.assertEqual(result["early_cutoff"], 1.0)
+
 
 class EarlyStopTest(unittest.TestCase):
     def test_stops_after_consecutive_failed_evals(self) -> None:

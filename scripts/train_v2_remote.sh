@@ -19,4 +19,7 @@ exec python -m alphazero_gomoku.train \
   --resume "$resume" \
   --batch-size "${BATCH_SIZE:-2048}" \
   --self-play-workers "${SELF_PLAY_WORKERS:-32}" \
+  --eval-games "${EVAL_GAMES:-32}" \
+  --eval-simulations "${EVAL_SIMULATIONS:-512}" \
+  --eval-progress-interval "${EVAL_PROGRESS_INTERVAL:-1}" \
   "$@"

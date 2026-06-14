@@ -90,6 +90,8 @@ class TrainConfig:
     eval_games: int = 0
     eval_simulations: int = 128
     eval_opening_moves: int = 2         # random opening plies per eval game pair (colors swapped)
+    eval_progress_interval: int = 1
+    eval_early_cutoff: bool = False
     promotion_threshold: float = 0.55
     gate_evaluation: bool = False
     early_stop_evals: int = 0           # stop after N consecutive failed evaluations (0 = off)
@@ -278,6 +280,8 @@ def preset_config(name: str) -> TrainConfig:
         cfg.eval_games = 32
         cfg.eval_simulations = 512
         cfg.eval_opening_moves = 4
+        cfg.eval_progress_interval = 1
+        cfg.eval_early_cutoff = True
         cfg.promotion_threshold = 0.55
         cfg.early_stop_evals = 4
         return cfg
@@ -1239,6 +1243,8 @@ def evaluate_candidate(
     baseline: PolicyValueNet | None,
     cfg: TrainConfig,
     rng: random.Random | None = None,
+    iteration: int | None = None,
+    end_iteration: int | None = None,
 ) -> dict[str, float]:
     """Pit candidate against baseline on randomised paired openings.
 
@@ -1247,13 +1253,37 @@ def evaluate_candidate(
     played twice with colors swapped, cancelling first-move advantage.
     """
     if baseline is None or cfg.eval_games <= 0:
-        return {"win_rate": 1.0, "wins": 0.0, "losses": 0.0, "draws": 0.0}
+        return {
+            "win_rate": 1.0,
+            "wins": 0.0,
+            "losses": 0.0,
+            "draws": 0.0,
+            "games": 0.0,
+            "early_cutoff": 0.0,
+        }
 
     rng = rng or random.Random(random.getrandbits(64))
     openings = [random_opening(cfg, rng) for _ in range((cfg.eval_games + 1) // 2)]
+    iter_label = (
+        f" iter={iteration}/{end_iteration}"
+        if iteration is not None and end_iteration is not None
+        else ""
+    )
+    eval_start = time.monotonic()
+    print(
+        f"eval_start{iter_label} games={cfg.eval_games} "
+        f"simulations={cfg.eval_simulations} opening_moves={cfg.eval_opening_moves} "
+        f"threshold={cfg.promotion_threshold:.3f} "
+        f"early_cutoff={cfg.eval_early_cutoff}",
+        flush=True,
+    )
     candidate.eval()
     baseline.eval()
     wins = losses = draws = 0
+    played = 0
+    early_cutoff = False
+    cutoff_reason = ""
+    threshold_score = cfg.promotion_threshold * cfg.eval_games
     for game_index in range(cfg.eval_games):
         state = GomokuState.new(size=cfg.board_size, win_length=cfg.win_length)
         for action in openings[game_index // 2]:
@@ -1267,16 +1297,60 @@ def evaluate_candidate(
             state = state.apply(action)
         if state.winner == 0:
             draws += 1
+            outcome = "draw"
         elif state.winner == candidate_player:
             wins += 1
+            outcome = "candidate"
         else:
             losses += 1
+            outcome = "baseline"
+        played += 1
+        score = wins + 0.5 * draws
+        remaining = cfg.eval_games - played
+        if cfg.eval_progress_interval > 0 and (
+            played % cfg.eval_progress_interval == 0 or played == cfg.eval_games
+        ):
+            print(
+                f"eval_game{iter_label} game={played}/{cfg.eval_games} "
+                f"candidate_color={'black' if candidate_player == 1 else 'white'} "
+                f"outcome={outcome} moves={state.moves_played} "
+                f"score={score / max(1, cfg.eval_games):.3f} "
+                f"wins={wins} losses={losses} draws={draws} "
+                f"elapsed={format_duration(time.monotonic() - eval_start)}",
+                flush=True,
+            )
+        if cfg.eval_early_cutoff:
+            if score + remaining < threshold_score:
+                early_cutoff = True
+                cutoff_reason = "cannot_reach_threshold"
+            elif score >= threshold_score:
+                early_cutoff = True
+                cutoff_reason = "already_above_threshold"
+            if early_cutoff:
+                print(
+                    f"eval_cutoff{iter_label} reason={cutoff_reason} "
+                    f"played={played}/{cfg.eval_games} "
+                    f"score={score / max(1, cfg.eval_games):.3f} "
+                    f"threshold={cfg.promotion_threshold:.3f} "
+                    f"wins={wins} losses={losses} draws={draws} "
+                    f"elapsed={format_duration(time.monotonic() - eval_start)}",
+                    flush=True,
+                )
+                break
     win_rate = (wins + 0.5 * draws) / max(1, cfg.eval_games)
+    print(
+        f"eval_done{iter_label} played={played}/{cfg.eval_games} "
+        f"score={win_rate:.3f} wins={wins} losses={losses} draws={draws} "
+        f"early_cutoff={early_cutoff} elapsed={format_duration(time.monotonic() - eval_start)}",
+        flush=True,
+    )
     return {
         "win_rate": float(win_rate),
         "wins": float(wins),
         "losses": float(losses),
         "draws": float(draws),
+        "games": float(played),
+        "early_cutoff": float(early_cutoff),
     }
 
 
@@ -1435,7 +1509,14 @@ def run_training(cfg: TrainConfig) -> None:
                 flush=True,
             )
 
-        eval_stats = {"win_rate": 1.0, "wins": 0.0, "losses": 0.0, "draws": 0.0}
+        eval_stats = {
+            "win_rate": 1.0,
+            "wins": 0.0,
+            "losses": 0.0,
+            "draws": 0.0,
+            "games": 0.0,
+            "early_cutoff": 0.0,
+        }
         promoted = True
         evaluated = (
             champion is not None
@@ -1445,14 +1526,21 @@ def run_training(cfg: TrainConfig) -> None:
         stop_early = False
         if evaluated:
             eval_stats = evaluate_candidate(
-                base_model, champion, cfg, rng=random.Random(cfg.seed + iteration * 7919)
+                base_model,
+                champion,
+                cfg,
+                rng=random.Random(cfg.seed + iteration * 7919),
+                iteration=iteration,
+                end_iteration=end_iteration,
             )
             promoted = eval_stats["win_rate"] >= cfg.promotion_threshold
             print(
                 f"eval_progress iter={iteration}/{end_iteration} "
                 f"candidate_score={eval_stats['win_rate']:.3f} "
                 f"wins={int(eval_stats['wins'])} losses={int(eval_stats['losses'])} "
-                f"draws={int(eval_stats['draws'])} threshold={cfg.promotion_threshold:.3f} "
+                f"draws={int(eval_stats['draws'])} games={int(eval_stats['games'])}/{cfg.eval_games} "
+                f"early_cutoff={bool(eval_stats['early_cutoff'])} "
+                f"threshold={cfg.promotion_threshold:.3f} "
                 f"promoted={promoted}",
                 flush=True,
             )
@@ -1517,6 +1605,8 @@ def run_training(cfg: TrainConfig) -> None:
                 "eval_wins": eval_stats["wins"],
                 "eval_losses": eval_stats["losses"],
                 "eval_draws": eval_stats["draws"],
+                "eval_games": eval_stats["games"],
+                "eval_early_cutoff": bool(eval_stats["early_cutoff"]),
                 "evaluated": evaluated,
                 "promoted": promoted,
                 "failed_evals": failed_evals,
@@ -1634,6 +1724,9 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--eval-games", type=int, default=defaults.eval_games)
     parser.add_argument("--eval-simulations", type=int, default=defaults.eval_simulations)
     parser.add_argument("--eval-opening-moves", type=int, default=defaults.eval_opening_moves)
+    parser.add_argument("--eval-progress-interval", type=int, default=defaults.eval_progress_interval)
+    parser.add_argument("--eval-early-cutoff", dest="eval_early_cutoff", action="store_true")
+    parser.add_argument("--no-eval-early-cutoff", dest="eval_early_cutoff", action="store_false")
     parser.add_argument("--early-stop-evals", type=int, default=defaults.early_stop_evals)
     parser.add_argument("--promotion-threshold", type=float, default=defaults.promotion_threshold)
     parser.add_argument("--gate-evaluation", dest="gate_evaluation", action="store_true")
@@ -1665,6 +1758,7 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
         playout_cap_randomization=defaults.playout_cap_randomization,
         selfplay_tree_reuse=defaults.selfplay_tree_reuse,
         gate_evaluation=defaults.gate_evaluation,
+        eval_early_cutoff=defaults.eval_early_cutoff,
         compile_model=defaults.compile_model,
         amp=defaults.amp,
     )

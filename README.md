@@ -211,6 +211,23 @@ python -m alphazero_gomoku.play \
 
 人类固定执白后手，AI 执黑先行。行列坐标均从 `1` 开始。
 
+## Benchmark lower search budgets
+
+Use this after a v2 checkpoint is available to check whether a smaller runtime
+search budget already beats the v1 baseline:
+
+```bash
+python alphazero_gomoku/scripts/benchmark_checkpoints.py \
+  --candidate alphazero_gomoku/outputs/checkpoints/v2/gomoku10_iter_0100.pt \
+  --baseline alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt \
+  --candidate-sims 128,256,512 \
+  --baseline-sims 512 \
+  --games 32 \
+  --device cuda
+```
+
+The target for deployment is `v2 @ 128/256 sims >= v1 @ 512 sims`.
+
 ## 本地网页对弈
 
 ```bash
