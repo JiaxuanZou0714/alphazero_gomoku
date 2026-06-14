@@ -11,4 +11,5 @@ venv/
 outputs/checkpoints/
 outputs/replay/
 outputs/logs/
+outputs/metrics/v2*.jsonl
 docs/assets/model/*.onnx
