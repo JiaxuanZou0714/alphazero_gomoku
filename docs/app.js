@@ -41,14 +41,17 @@ const computeDetail = document.querySelector("#computeDetail");
 const recommendationTitle = document.querySelector("#recommendationTitle");
 const recommendationMove = document.querySelector("#recommendationMove");
 const recommendationMain = document.querySelector("#recommendationMain");
+const recommendationPanel = document.querySelector(".recommendation");
 const recSearch = document.querySelector("#recSearch");
 const recPolicy = document.querySelector("#recPolicy");
 const recWin = document.querySelector("#recWin");
 const recommendationWhy = document.querySelector("#recommendationWhy");
 const analysisDetails = document.querySelector(".analysis-details");
+const networkDetails = document.querySelector(".network-details");
 const sideInputs = [...document.querySelectorAll("input[name='side']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 
+const APP_VERSION = "2026-06-14-ui-compact-analysis";
 let state = null;
 let selectedSide = "white";
 let overlayMode = "none";
@@ -65,17 +68,17 @@ let mermaidError = false;
 let mermaidPromise = null;
 const pending = new Map();
 
-const worker = new Worker("./engine.worker.js");
+const worker = new Worker(`./engine.worker.js?v=${APP_VERSION}`);
 
 const SIMULATION_OPTIONS = [16, 32, 64, 128, 256, 512, 1024, 2048];
 const NETWORK_DIAGRAM = String.raw`
 flowchart LR
-  input["棋盘输入<br/>2×10×10"]
-  stem["3×3 卷积<br/>192 通道"]
-  tower["12× 残差块<br/>Conv + skip"]
-  policy["策略头<br/>100 个落点"]
-  value["价值头<br/>1 个胜率"]
-  mcts["MCTS<br/>反复调用"]
+  input["棋盘输入<br/>黑 / 白两层"]
+  stem["卷积特征<br/>192 通道"]
+  tower["残差塔<br/>12 块"]
+  policy["落点倾向<br/>100 logits"]
+  value["局面评估<br/>1 value"]
+  mcts["MCTS<br/>反复搜索"]
   input --> stem --> tower
   tower --> policy --> mcts
   tower --> value --> mcts
@@ -166,14 +169,14 @@ function busyCopy(label) {
   if (label.includes("提示")) {
     return {
       title: "生成提示",
-      detail: "MCTS 正在重新评估当前局面",
+      detail: "MCTS 正在比较候选落点",
       tone: "thinking",
     };
   }
   if (label.includes("思考")) {
     return {
       title: "AI 思考中",
-      detail: "搜索候选点并回传胜率评估",
+      detail: "搜索树正在扩展",
       tone: "thinking",
     };
   }
@@ -203,6 +206,9 @@ function setBusy(nextBusy, label = "") {
   [newGameBtn, undoBtn, analyzeBtn, simSlider, ...sideInputs].forEach((el) => {
     el.disabled = busy;
   });
+  newGameBtn.textContent = busy && label.includes("新对局") ? "开局中" : "新对局";
+  undoBtn.textContent = busy && label.includes("悔棋") ? "回退中" : "悔棋";
+  analyzeBtn.textContent = busy && label.includes("提示") ? "深算中" : "提示";
   boardEl.classList.toggle("busy", busy);
   boardEl.setAttribute("aria-busy", String(busy));
   computeOverlay.hidden = !busy;
@@ -377,10 +383,10 @@ function renderEval() {
       evalSource.textContent = "终局结果。";
       statSims.textContent = "终局";
     } else if (evaluation.source === "mcts") {
-      evalSource.textContent = `复用 MCTS · ${playerName(evaluation.player)}方行棋`;
+      evalSource.textContent = "黑方胜率来自本次 MCTS 搜索。";
       statSims.textContent = "MCTS";
     } else {
-      evalSource.textContent = `模型实时 · ${playerName(evaluation.player)}方行棋`;
+      evalSource.textContent = "黑方胜率来自神经网络单次评估。";
       statSims.textContent = "模型";
     }
     statTime.textContent = evaluation.elapsedMs >= 1000
@@ -395,7 +401,7 @@ function renderEval() {
   if (!a || !a.visitMap) {
     overlayNote.textContent = "点“提示”后显示候选。";
   } else {
-    overlayNote.textContent = `当前局面 · ${a.simulations} sims`;
+    overlayNote.textContent = `当前局面 · 本次 ${a.requestedSimulations || a.simulations} / 累计访问 ${a.simulations}`;
   }
 }
 
@@ -406,7 +412,8 @@ function renderRecommendation() {
   const isHumanTurn = state && state.winner === null && state.currentPlayer === state.humanPlayer;
 
   if (!a || !cands.length) {
-    recommendationTitle.textContent = "提示";
+    recommendationPanel.classList.remove("has-analysis");
+    recommendationTitle.textContent = "建议";
     recommendationMove.textContent = "-";
     recSearch.textContent = "-";
     recPolicy.textContent = "-";
@@ -425,6 +432,7 @@ function renderRecommendation() {
     return;
   }
 
+  recommendationPanel.classList.add("has-analysis");
   const selected = cands.find((c) => c.selected) || cands[0];
   const selectedWin = selected.q === null ? null : (selected.q + 1) / 2;
   const selectedMove = moveText(selected);
@@ -435,7 +443,7 @@ function renderRecommendation() {
   recPolicy.textContent = pct(selected.prior, 1);
   recWin.textContent = selectedWin === null ? "-" : pct(selectedWin);
   recommendationMain.textContent = `下在 ${selectedMove}`;
-  recommendationWhy.textContent = `${a.simulations} 次深算`;
+  recommendationWhy.textContent = `本次 ${a.requestedSimulations || a.simulations} 次模拟。访问最多的分支就是 MCTS 最后最认可的选择。`;
 }
 
 function renderCandidates() {
@@ -460,6 +468,17 @@ function renderCandidates() {
     if (c.selected) tr.classList.add("best");
     const win = c.q === null ? null : (c.q + 1) / 2;
     const shareWidth = Math.max(2, Math.min(100, c.share * 100)).toFixed(1);
+    const idx = c.row * state.size + c.col;
+    const labelParts = [
+      c.selected ? "建议点" : "候选点",
+      `${c.row + 1},${c.col + 1}`,
+      `访问 ${c.visits}`,
+      `占比 ${pct(c.share)}`,
+      `模型倾向 ${pct(c.prior, 1)}`,
+    ];
+    if (win !== null) labelParts.push(`胜率 ${pct(win)}`);
+    tr.tabIndex = 0;
+    tr.setAttribute("aria-label", labelParts.join("，"));
     const moveCell = document.createElement("td");
     moveCell.textContent = `${c.selected ? "✓ " : ""}${c.row + 1},${c.col + 1}`;
     tr.appendChild(moveCell);
@@ -487,9 +506,12 @@ function renderCandidates() {
     winCell.textContent = win === null ? "-" : pct(win);
     tr.appendChild(winCell);
 
-    const idx = c.row * state.size + c.col;
-    tr.addEventListener("mouseenter", () => cells[idx].classList.add("hl"));
-    tr.addEventListener("mouseleave", () => cells[idx].classList.remove("hl"));
+    const mark = () => cells[idx].classList.add("hl");
+    const unmark = () => cells[idx].classList.remove("hl");
+    tr.addEventListener("mouseenter", mark);
+    tr.addEventListener("mouseleave", unmark);
+    tr.addEventListener("focus", mark);
+    tr.addEventListener("blur", unmark);
     candBody.appendChild(tr);
   });
 }
@@ -553,12 +575,12 @@ function buildTreeData(nodes) {
 }
 
 function treeNodeRadius(node) {
-  if (node.depth === 0) return 11;
+  if (node.depth === 0) return 10;
   const share = Math.max(0.01, node.branchShare || node.share || 0.01);
-  if (node.depth === 1) return 7 + Math.sqrt(share) * 15;
-  if (node.depth === 2) return 5 + Math.sqrt(share) * 8;
-  if (node.depth === 3) return 4 + Math.sqrt(share) * 5;
-  return 3.3 + Math.sqrt(share) * 3.2;
+  if (node.depth === 1) return 7 + Math.sqrt(share) * 13;
+  if (node.depth === 2) return 5 + Math.sqrt(share) * 7;
+  if (node.depth === 3) return 4 + Math.sqrt(share) * 4;
+  return 3.2 + Math.sqrt(share) * 2.8;
 }
 
 function treeNodeLabel(node) {
@@ -571,7 +593,7 @@ function treeNodeTitle(node) {
   if (node.depth === 0) return "当前局面";
   const move = `${node.mover === 1 ? "黑" : "白"} ${node.row + 1},${node.col + 1}`;
   const win = node.winProb === null ? "-" : pct(node.winProb);
-  return `${move} · 模拟 ${node.visits} · 分支 ${pct(node.branchShare || 0)} · 当前方胜率 ${win}`;
+  return `${move} · 访问 ${node.visits} · 分支 ${pct(node.branchShare || 0)} · 当前方胜率 ${win}`;
 }
 
 function renderTreeWithD3(nodes, edges) {
@@ -583,8 +605,10 @@ function renderTreeWithD3(nodes, edges) {
 
   const maxDepth = Math.max(...nodes.map((node) => node.depth));
   const width = 920;
-  const height = Math.max(460, 148 + Math.max(1, maxDepth) * 72);
-  const margin = { top: 46, right: 52, bottom: 42, left: 52 };
+  const leafIds = new Set(nodes.map((node) => node.parentId).filter((id) => id !== null));
+  const leafCount = Math.max(1, nodes.filter((node) => !leafIds.has(node.id)).length);
+  const height = Math.max(420, Math.min(720, 150 + leafCount * 42));
+  const margin = { top: 42, right: 46, bottom: 42, left: 58 };
   const edgeByTarget = new Map(edges.map((edge) => [edge.to, edge]));
   const root = d3Tree.hierarchy(rootData);
   root.sort((a, b) => Number(b.data.principal) - Number(a.data.principal)
@@ -592,19 +616,19 @@ function renderTreeWithD3(nodes, edges) {
     || (a.data.rank || 0) - (b.data.rank || 0));
 
   d3Tree.tree()
-    .size([width - margin.left - margin.right, height - margin.top - margin.bottom])
+    .size([height - margin.top - margin.bottom, width - margin.left - margin.right])
     .separation((a, b) => (a.parent === b.parent ? 1 : 1.35) + Math.abs(a.depth - b.depth) * 0.08)(root);
 
   root.each((node) => {
-    node.x += margin.left;
-    node.y += margin.top;
+    node.x += margin.top;
+    node.y += margin.left;
   });
 
   const svg = d3Tree.select(treeSvg);
   svg.selectAll("*").remove();
   svg.attr("viewBox", `0 0 ${width} ${height}`);
 
-  const depthLabels = ["当前", "候选落点", "回应", "再展开", "深层", "尾部", "末端"];
+  const depthLabels = ["当前", "候选", "回应", "再展开", "深层", "尾部", "末端"];
   const rows = Array.from(d3Tree.group(root.descendants(), (node) => node.depth), ([depth, group]) => ({
     depth,
     y: group[0].y,
@@ -615,22 +639,23 @@ function renderTreeWithD3(nodes, edges) {
     .data(rows)
     .join("line")
     .attr("class", "tree-depth-line")
-    .attr("x1", 28)
-    .attr("x2", width - 28)
-    .attr("y1", (row) => row.y)
-    .attr("y2", (row) => row.y);
+    .attr("x1", (row) => row.y)
+    .attr("x2", (row) => row.y)
+    .attr("y1", 26)
+    .attr("y2", height - 26);
 
   backdrop.selectAll("text")
     .data(rows)
     .join("text")
     .attr("class", "tree-depth-label")
-    .attr("x", 34)
-    .attr("y", (row) => row.y - 10)
+    .attr("x", (row) => row.y)
+    .attr("y", 24)
+    .attr("text-anchor", "middle")
     .text((row) => depthLabels[row.depth] || `第 ${row.depth} 层`);
 
-  const link = d3Tree.linkVertical()
-    .x((node) => node.x)
-    .y((node) => node.y);
+  const link = d3Tree.linkHorizontal()
+    .x((node) => node.y)
+    .y((node) => node.x);
 
   svg.append("g")
     .attr("class", "tree-edges")
@@ -663,7 +688,7 @@ function renderTreeWithD3(nodes, edges) {
       const color = item.depth === 0 ? "root" : data.mover === 1 ? "black" : "white";
       return `tree-node depth-${item.depth} ${color} ${data.principal && item.depth > 0 ? "best" : ""}`;
     })
-    .attr("transform", (item) => `translate(${item.x.toFixed(1)},${item.y.toFixed(1)})`);
+    .attr("transform", (item) => `translate(${item.y.toFixed(1)},${item.x.toFixed(1)})`);
 
   node.append("circle")
     .attr("r", (item) => Math.min(item.depth >= 4 ? 5 : item.depth === 3 ? 6.2 : item.depth === 2 ? 9.5 : 22, treeNodeRadius(item.data)).toFixed(1));
@@ -684,9 +709,9 @@ function renderTree() {
   const tree = a && a.tree;
   const nodes = tree && tree.nodes ? tree.nodes : [];
   const edges = tree && tree.edges ? tree.edges : [];
-  treeTitle.textContent = "MCTS 树";
+  treeTitle.textContent = "MCTS 搜索树";
   treeCopy.textContent = context
-    ? "这里只显示访问最多的摘要树。线越粗，代表这条分支被模拟得越多；红线是当前主线。"
+    ? "这里只显示访问最多的一小部分搜索树。越往右代表后续层数越深；线越粗，访问越多。"
     : "点“提示”后显示。";
   treeCount.textContent = Math.max(0, nodes.length - 1);
   treeDepth.textContent = nodes.length ? "深度 -" : "等待建议";
@@ -709,7 +734,7 @@ function renderTree() {
   }
 
   if (d3TreeError) {
-    renderTreeMessage("树图加载失败", "D3 CDN 暂时不可用，候选表仍可用");
+    renderTreeMessage("树图加载失败", "D3 暂时不可用，候选表仍可用");
     return;
   }
 
@@ -722,7 +747,7 @@ function renderTree() {
       })
       .catch(() => {
         d3TreeError = true;
-        renderTreeMessage("树图加载失败", "D3 CDN 暂时不可用，候选表仍可用");
+        renderTreeMessage("树图加载失败", "D3 暂时不可用，候选表仍可用");
       });
     return;
   }
@@ -862,7 +887,9 @@ async function analyze() {
   if (busy || !state || state.winner !== null) return;
   try {
     setBusy(true, "生成提示");
-    render(await callWorker("analyze", { simulations: selectedSimulations() }));
+    const nextState = await callWorker("analyze", { simulations: selectedSimulations() });
+    analysisDetails.open = true;
+    render(nextState);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -940,8 +967,10 @@ undoBtn.addEventListener("click", undo);
 analyzeBtn.addEventListener("click", analyze);
 analysisDetails.addEventListener("toggle", () => {
   if (!analysisDetails.open) return;
-  initNetworkDiagram();
   renderTree();
+});
+networkDetails.addEventListener("toggle", () => {
+  if (networkDetails.open) initNetworkDiagram();
 });
 
 async function boot() {

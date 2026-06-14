@@ -69,6 +69,7 @@ button {
   padding: 9px 13px;
   cursor: pointer;
   font-weight: 680;
+  touch-action: manipulation;
   transition:
     background-color 160ms ease,
     border-color 160ms ease,
@@ -91,7 +92,9 @@ button:disabled {
 
 button:focus-visible,
 input:focus-visible,
+summary:focus-visible,
 .cell:focus-visible,
+.candidates tr:focus-visible,
 .segment:has(input:focus-visible) {
   outline: 3px solid rgba(27, 122, 115, 0.45);
   outline-offset: 3px;
@@ -415,9 +418,10 @@ h1 {
   inset: 0;
   z-index: 7;
   display: grid;
-  place-items: center;
+  place-items: start center;
+  padding-top: 12px;
   border-radius: 4px;
-  background: rgba(246, 247, 245, 0.38);
+  background: linear-gradient(180deg, rgba(246, 247, 245, 0.42), rgba(246, 247, 245, 0.06) 42%, transparent);
   pointer-events: none;
   animation: computeFade 180ms var(--ease-out);
 }
@@ -430,13 +434,13 @@ h1 {
   display: flex;
   align-items: center;
   gap: 12px;
-  max-width: min(360px, calc(100% - 32px));
+  max-width: min(320px, calc(100% - 32px));
   border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.96);
   color: var(--ink);
-  padding: 12px 14px;
-  box-shadow: 0 4px 8px rgba(42, 48, 38, 0.12);
+  padding: 9px 12px;
+  box-shadow: 0 5px 12px rgba(42, 48, 38, 0.14);
   animation: computeCardIn 220ms var(--ease-out);
 }
 
@@ -615,7 +619,7 @@ h1 {
   position: relative;
   display: grid;
   place-items: center;
-  min-height: 34px;
+  min-height: 44px;
   border-color: transparent;
   border: 1px solid transparent;
   border-radius: 5px;
@@ -624,6 +628,7 @@ h1 {
   padding: 7px 12px;
   box-shadow: none;
   cursor: pointer;
+  touch-action: manipulation;
   text-align: center;
   font-weight: 680;
   user-select: none;
@@ -706,6 +711,10 @@ h1 {
   min-height: 0;
 }
 
+.app-shell:has(.analysis-details[open]) .side-pane {
+  position: static;
+}
+
 .panel {
   min-width: 0;
   border: 1px solid var(--line);
@@ -774,6 +783,10 @@ h1 {
   gap: 8px;
 }
 
+.actions button {
+  padding-inline: 10px;
+}
+
 .recommendation .panel-title {
   margin-bottom: 8px;
 }
@@ -789,6 +802,36 @@ h1 {
 
 .recommendation-metrics {
   display: none;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.recommendation.has-analysis .recommendation-metrics {
+  display: grid;
+}
+
+.recommendation-metrics div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fafbf9;
+  padding: 7px;
+}
+
+.recommendation-metrics span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.recommendation-metrics strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .recommendation-why {
@@ -909,6 +952,10 @@ tbody tr:hover td {
   background: rgba(27, 122, 115, 0.06);
 }
 
+tbody tr:focus-visible td {
+  background: rgba(27, 122, 115, 0.08);
+}
+
 th {
   color: var(--ink);
   font-weight: 820;
@@ -968,14 +1015,14 @@ tr.empty-row td {
 }
 
 .analysis-details {
-  grid-column: 1;
+  grid-column: 1 / -1;
   width: 100%;
   justify-self: stretch;
 }
 
 .analysis-details summary {
   width: max-content;
-  min-height: 36px;
+  min-height: 44px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface);
@@ -984,6 +1031,7 @@ tr.empty-row td {
   cursor: pointer;
   font-weight: 700;
   list-style-position: inside;
+  touch-action: manipulation;
 }
 
 .analysis-details[open] summary {
@@ -995,12 +1043,28 @@ tr.empty-row td {
   margin-bottom: 12px;
 }
 
+.network-details {
+  margin-top: 12px;
+}
+
+.network-details > summary {
+  min-height: 44px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  padding-inline: 0;
+}
+
+.network-details[open] > summary {
+  margin-bottom: 8px;
+}
+
 .network-panel {
-  margin-bottom: 12px;
+  padding: 10px;
 }
 
 .network-diagram {
-  min-height: 230px;
+  min-height: 180px;
   margin: 0;
   overflow: auto;
   border: 1px solid var(--line);
@@ -1034,7 +1098,8 @@ tr.empty-row td {
 
 .analysis-detail-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  align-items: start;
   gap: 12px;
 }
 
@@ -1104,14 +1169,13 @@ tr.empty-row td {
 .tree-svg {
   display: block;
   width: 100%;
-  min-height: 420px;
-  height: min(58vh, 560px);
+  min-height: 440px;
+  height: min(62vh, 620px);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 6px;
   background:
-    linear-gradient(rgba(32, 35, 31, 0.045) 1px, transparent 1px) 0 0 / 100% 56px,
-    linear-gradient(90deg, rgba(32, 35, 31, 0.03) 1px, transparent 1px) 0 0 / 56px 100%,
+    linear-gradient(90deg, rgba(32, 35, 31, 0.035) 1px, transparent 1px) 0 0 / 92px 100%,
     #fbfcfa;
 }
 
@@ -1145,8 +1209,6 @@ tr.empty-row td {
 
 .tree-edge.best {
   stroke: rgba(184, 90, 73, 0.88);
-  stroke-dasharray: 8 5;
-  animation: treeFlow 1200ms linear infinite;
 }
 
 .tree-node circle {
@@ -1325,6 +1387,12 @@ ol {
   font-variant-numeric: tabular-nums;
 }
 
+.history ol {
+  max-height: 152px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 li {
   display: flex;
   justify-content: space-between;
@@ -1451,9 +1519,17 @@ li {
     width: 100%;
   }
 
-  .actions,
   dl {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tree-legend strong {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .recommendation-metrics {
+    grid-template-columns: 1fr;
   }
 
   .tree-svg {

@@ -84,22 +84,22 @@
           </label>
 
           <div class="actions">
-            <button id="newGame" type="button">新对局</button>
+            <button class="secondary" id="newGame" type="button">新对局</button>
             <button class="secondary" id="undo" type="button">悔棋</button>
-            <button class="secondary" id="analyze" type="button">提示</button>
+            <button id="analyze" type="button">提示</button>
           </div>
         </section>
 
         <section class="panel recommendation" aria-live="polite">
           <div class="panel-title">
-            <span id="recommendationTitle">提示</span>
+            <span id="recommendationTitle">建议</span>
             <strong id="recommendationMove">-</strong>
           </div>
           <p class="recommendation-main" id="recommendationMain">
             轮到你时点“提示”。
           </p>
           <div class="recommendation-metrics" aria-label="建议依据">
-            <div><span>深算占比</span><strong id="recSearch">-</strong></div>
+            <div><span>访问占比</span><strong id="recSearch">-</strong></div>
             <div><span>模型倾向</span><strong id="recPolicy">-</strong></div>
             <div><span>分支胜率</span><strong id="recWin">-</strong></div>
           </div>
@@ -108,7 +108,7 @@
 
         <section class="panel stats">
           <div class="panel-title">
-            <span>局面评估</span>
+            <span>黑方胜率</span>
             <strong id="winProb">-</strong>
           </div>
           <div class="win-meter" aria-hidden="true">
@@ -127,7 +127,7 @@
 
         <section class="panel history">
           <div class="panel-title">
-            <span>棋谱</span>
+            <span>最近落子</span>
             <strong id="historyCount">0</strong>
           </div>
           <ol id="historyList"></ol>
@@ -135,15 +135,7 @@
       </aside>
 
       <details class="analysis-details">
-        <summary>分析详情</summary>
-        <section class="panel network-panel">
-          <div class="panel-title">
-            <span>CNN 结构</span>
-          </div>
-          <div class="network-diagram" id="networkDiagram">网络结构图加载中</div>
-          <p class="network-copy">使用 Mermaid 自动布局。当前 ONNX：27 个卷积算子，输出落点 logits 和局面 value。</p>
-        </section>
-
+        <summary>搜索详情</summary>
         <div class="overlay-controls">
           <div class="overlay-toolbox">
             <fieldset class="segmented overlay-seg" aria-label="叠加层">
@@ -154,14 +146,14 @@
               </label>
               <label class="segment">
                 <input type="radio" name="overlay" value="search" />
-                <span>深算</span>
+                <span>搜索</span>
               </label>
               <label class="segment">
                 <input type="radio" name="overlay" value="policy" />
-                <span>倾向</span>
+                <span>模型</span>
               </label>
             </fieldset>
-            <p class="overlay-help">深算=搜索后重点看的点；倾向=模型第一眼的落点概率。</p>
+            <p class="overlay-help">搜索：MCTS 最后实际访问的位置。模型：神经网络不搜索时给出的落点倾向。</p>
           </div>
           <label class="pv-toggle">
             <input id="pvToggle" type="checkbox" />
@@ -172,14 +164,14 @@
         <div class="analysis-detail-grid">
           <section class="panel tree-panel">
             <div class="panel-title">
-              <span id="treeTitle">MCTS 树</span>
+              <span id="treeTitle">MCTS 搜索树</span>
               <strong id="treeCount">0</strong>
             </div>
             <p class="tree-copy" id="treeCopy">点“提示”后显示。</p>
             <div class="tree-legend" aria-label="MCTS 图例">
               <span><i class="legend-line main"></i>主线</span>
               <span><i class="legend-line branch"></i>分支</span>
-              <span><i class="legend-dot"></i>节点</span>
+              <span><i class="legend-dot"></i>节点越大访问越多</span>
               <strong id="treeDepth">等待建议</strong>
             </div>
             <svg id="treeSvg" class="tree-svg" viewBox="0 0 920 460" role="img" aria-label="MCTS 搜索树"></svg>
@@ -193,12 +185,20 @@
             <p class="source" id="overlayNote">点“提示”后显示候选。</p>
             <table>
               <thead>
-                <tr><th>点位</th><th>模拟</th><th>占比</th><th>倾向</th><th>胜率</th></tr>
+                <tr><th>点位</th><th>访问</th><th>占比</th><th>模型</th><th>胜率</th></tr>
               </thead>
               <tbody id="candBody"></tbody>
             </table>
           </section>
         </div>
+
+        <details class="network-details">
+          <summary>模型结构</summary>
+          <section class="panel network-panel">
+            <div class="network-diagram" id="networkDiagram">网络结构图加载中</div>
+            <p class="network-copy">当前模型只看棋盘黑白两层，不注入定式或人工规则；CNN 输出落点 logits 和局面 value，MCTS 反复调用它来比较候选。</p>
+          </section>
+        </details>
       </details>
     </main>
 

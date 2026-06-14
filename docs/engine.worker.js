@@ -363,7 +363,7 @@ function rootPolicy(root) {
   return visits;
 }
 
-function searchAnalysis(root, state, elapsedMs) {
+function searchAnalysis(root, state, elapsedMs, requestedSimulations) {
   const actionSize = state.actionSize;
   const visitMap = Array.from(rootPolicy(root));
   const priorMap = new Array(actionSize).fill(0);
@@ -414,6 +414,7 @@ function searchAnalysis(root, state, elapsedMs) {
       rootValue: root.value,
       winProb: (root.value + 1) / 2,
       simulations: root.visitCount,
+      requestedSimulations,
       elapsedMs,
       visitMap,
       priorMap,
@@ -742,7 +743,7 @@ class GameSession {
     const start = performance.now();
     const root = await this.mcts.search(this.state, this.simulations, this.currentReusableRoot());
     this.storeReusableRoot(root);
-    const result = searchAnalysis(root, this.state, performance.now() - start);
+    const result = searchAnalysis(root, this.state, performance.now() - start, this.simulations);
     result.root = root;
     return result;
   }
