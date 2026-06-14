@@ -558,7 +558,7 @@ class GameSession {
 
   async analyze(simulations = null) {
     if (simulations !== null) this.simulations = Math.max(1, Number(simulations));
-    if (this.state.winner !== null) throw new Error("终局不能分析");
+    if (this.state.winner !== null) throw new Error("终局后不能生成提示");
     const { analysis } = await this.searchPolicy();
     this.lastAnalysis = analysis;
     this.policySource = "analysis";

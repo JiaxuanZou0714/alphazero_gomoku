@@ -271,7 +271,7 @@ function renderTree() {
       class: "tree-empty",
       "text-anchor": "middle",
     });
-    text.textContent = "落子或点击分析后显示搜索树";
+    text.textContent = "落子或点击提示后显示搜索树";
     treeSvg.appendChild(text);
     return;
   }
@@ -497,7 +497,7 @@ async function undo() {
 async function analyze() {
   if (busy || !state || state.winner !== null) return;
   try {
-    setBusy(true, "分析中");
+    setBusy(true, "生成提示");
     render(await callWorker("analyze", { simulations: Number(simSlider.value) }));
     if (overlayMode === "none") setOverlay("search");
   } catch (error) {
