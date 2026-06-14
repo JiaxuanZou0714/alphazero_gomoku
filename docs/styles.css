@@ -94,7 +94,7 @@ button:disabled {
 
 .board-pane {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto auto;
   gap: 14px;
   min-height: calc(100vh - 36px);
 }
@@ -705,6 +705,8 @@ tr.best td {
 }
 
 .tree-panel {
+  width: min(980px, 100%);
+  justify-self: center;
   overflow: hidden;
 }
 
@@ -715,19 +717,29 @@ tr.best td {
 .tree-svg {
   display: block;
   width: 100%;
-  height: 220px;
+  height: 320px;
   overflow: hidden;
-  border: 1px solid rgba(211, 218, 203, 0.7);
+  border: 1px solid rgba(31, 48, 43, 0.2);
   border-radius: 8px;
   background:
-    linear-gradient(rgba(111, 120, 109, 0.08) 1px, transparent 1px) 0 0 / 100% 55px,
-    linear-gradient(180deg, rgba(255, 254, 250, 0.96), rgba(240, 245, 237, 0.9));
+    linear-gradient(rgba(236, 243, 234, 0.055) 1px, transparent 1px) 0 0 / 100% 52px,
+    linear-gradient(90deg, rgba(236, 243, 234, 0.05) 1px, transparent 1px) 0 0 / 45px 100%,
+    linear-gradient(180deg, #16221f, #101714 62%, #141d19);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -28px 48px rgba(0, 0, 0, 0.18);
+}
+
+.tree-depth-line {
+  stroke: rgba(236, 243, 234, 0.08);
+  stroke-width: 1;
 }
 
 .tree-edge {
   fill: none;
-  stroke: rgba(27, 122, 115, 0.4);
+  stroke: rgba(122, 202, 188, 0.42);
   stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(122, 202, 188, 0.12));
   transition:
     stroke 160ms ease,
     opacity 160ms ease,
@@ -735,11 +747,25 @@ tr.best td {
 }
 
 .tree-edge.strong {
-  stroke: rgba(27, 122, 115, 0.54);
+  stroke: rgba(143, 217, 203, 0.64);
 }
 
 .tree-edge.best {
-  stroke: rgba(194, 75, 51, 0.74);
+  stroke: rgba(226, 132, 111, 0.92);
+  stroke-dasharray: 8 5;
+  animation: treeFlow 1200ms linear infinite;
+  filter: drop-shadow(0 0 6px rgba(226, 132, 111, 0.34));
+}
+
+.tree-pulse {
+  fill: rgba(228, 239, 232, 0.72);
+  filter: drop-shadow(0 0 4px rgba(162, 228, 214, 0.44));
+  animation: treePulse 1800ms ease-in-out infinite;
+}
+
+.tree-pulse.best {
+  fill: #ffd1c2;
+  filter: drop-shadow(0 0 5px rgba(226, 132, 111, 0.62));
 }
 
 .tree-node circle {
@@ -748,53 +774,89 @@ tr.best td {
 }
 
 .tree-node.root circle {
-  fill: var(--accent-2);
-  stroke: rgba(255, 254, 250, 0.95);
+  fill: #22a39a;
+  stroke: rgba(243, 248, 242, 0.92);
+  filter: drop-shadow(0 0 9px rgba(34, 163, 154, 0.38));
 }
 
 .tree-node.black circle {
-  fill: #151613;
-  stroke: rgba(255, 254, 250, 0.92);
-  filter: drop-shadow(0 4px 8px rgba(20, 20, 18, 0.22));
+  fill: #0b0e0d;
+  stroke: rgba(229, 238, 230, 0.72);
+  filter: drop-shadow(0 5px 9px rgba(0, 0, 0, 0.36));
 }
 
 .tree-node.white circle {
-  fill: #fffdf7;
-  stroke: rgba(32, 35, 31, 0.38);
-  filter: drop-shadow(0 4px 8px rgba(20, 20, 18, 0.14));
+  fill: #f4f4eb;
+  stroke: rgba(236, 243, 234, 0.92);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.26));
 }
 
 .tree-node.best circle {
-  stroke: var(--accent);
-  stroke-width: 2.5;
+  stroke: #e2846f;
+  stroke-width: 2.8;
+  filter: drop-shadow(0 0 7px rgba(226, 132, 111, 0.42));
 }
 
 .tree-node.depth-2 circle {
-  opacity: 0.88;
+  opacity: 0.9;
+}
+
+.tree-node.depth-3 circle,
+.tree-node.depth-4 circle,
+.tree-node.depth-5 circle {
+  opacity: 0.78;
+  stroke-width: 1.4;
 }
 
 .tree-node text,
 .tree-empty {
-  fill: var(--muted);
+  fill: rgba(236, 243, 234, 0.8);
   font-size: 10px;
   font-weight: 800;
   paint-order: stroke;
-  stroke: rgba(255, 254, 250, 0.8);
+  stroke: rgba(16, 23, 20, 0.88);
   stroke-width: 3px;
 }
 
 .tree-node.root text {
-  fill: var(--accent-2);
+  fill: #9ce4d8;
   font-size: 11px;
 }
 
 .tree-node.depth-1 text {
-  fill: var(--ink);
+  fill: rgba(247, 250, 247, 0.92);
   font-size: 11px;
 }
 
-.tree-node.depth-2 text {
+.tree-node.depth-2 text,
+.tree-node.depth-3 text,
+.tree-node.depth-4 text,
+.tree-node.depth-5 text {
   display: none;
+}
+
+@keyframes treePulse {
+  0%,
+  100% {
+    opacity: 0.34;
+  }
+
+  45% {
+    opacity: 1;
+  }
+}
+
+@keyframes treeFlow {
+  to {
+    stroke-dashoffset: -26;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-edge.best,
+  .tree-pulse {
+    animation: none;
+  }
 }
 
 .candidates table {
@@ -910,5 +972,9 @@ li {
   .actions,
   dl {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tree-svg {
+    height: 260px;
   }
 }

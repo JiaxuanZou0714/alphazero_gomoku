@@ -53,6 +53,15 @@
             <small>AI 预计的后续路线</small>
           </label>
         </div>
+
+        <section class="panel tree-panel">
+          <div class="panel-title">
+            <span>MCTS 搜索树</span>
+            <strong id="treeCount">0</strong>
+          </div>
+          <p class="source">红线是 AI 继续深挖的主线；横向分支是候选，底部小点是被模拟过的后续局面。</p>
+          <svg id="treeSvg" class="tree-svg" viewBox="0 0 760 320" role="img" aria-label="MCTS 搜索树"></svg>
+        </section>
       </section>
 
       <aside class="side-pane">
@@ -97,15 +106,6 @@
           </dl>
           <p class="source" id="evalSource">-</p>
           <canvas id="evalChart" height="120"></canvas>
-        </section>
-
-        <section class="panel tree-panel">
-          <div class="panel-title">
-            <span>MCTS 搜索树</span>
-            <strong id="treeCount">0</strong>
-          </div>
-          <p class="source">只显示访问最多的主干分支。节点越大=模拟越多，线越粗=这条路线被继续展开得越多。</p>
-          <svg id="treeSvg" class="tree-svg" viewBox="0 0 320 220" role="img" aria-label="MCTS 搜索树"></svg>
         </section>
 
         <section class="panel candidates">

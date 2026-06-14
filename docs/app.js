@@ -266,8 +266,8 @@ function renderTree() {
 
   if (!nodes.length) {
     const text = svgEl("text", {
-      x: 160,
-      y: 92,
+      x: 380,
+      y: 150,
       class: "tree-empty",
       "text-anchor": "middle",
     });
@@ -276,7 +276,10 @@ function renderTree() {
     return;
   }
 
-  const width = 320;
+  const width = 760;
+  const height = 320;
+  const maxDepth = Math.max(...nodes.map((node) => node.depth));
+  const depthY = [30, 92, 150, 206, 258, 294];
   const byDepth = new Map();
   nodes.forEach((node) => {
     if (!byDepth.has(node.depth)) byDepth.set(node.depth, []);
@@ -285,43 +288,87 @@ function renderTree() {
 
   const positions = new Map();
   const root = nodes.find((node) => node.depth === 0);
-  if (root) positions.set(root.id, { x: width / 2, y: 28 });
+  if (root) positions.set(root.id, { x: width / 2, y: depthY[0] });
   const first = byDepth.get(1) || [];
   first.forEach((node, index) => {
-    const x = 36 + ((index + 1) / (first.length + 1)) * (width - 72);
-    positions.set(node.id, { x, y: 100 });
+    const x = 54 + ((index + 1) / (first.length + 1)) * (width - 108);
+    positions.set(node.id, { x, y: depthY[1] });
   });
-  const second = byDepth.get(2) || [];
-  const byParent = new Map();
-  second.forEach((node) => {
-    if (!byParent.has(node.parentId)) byParent.set(node.parentId, []);
-    byParent.get(node.parentId).push(node);
-  });
-  for (const [parentId, group] of byParent.entries()) {
-    const parent = positions.get(parentId);
-    if (!parent) continue;
-    group.forEach((node, index) => {
-      const spread = group.length === 1 ? 0 : (index - (group.length - 1) / 2) * 22;
-      positions.set(node.id, {
-        x: Math.max(18, Math.min(width - 18, parent.x + spread)),
-        y: 168,
-      });
+
+  for (let depth = 2; depth <= maxDepth; depth += 1) {
+    const byParent = new Map();
+    (byDepth.get(depth) || []).forEach((node) => {
+      if (!byParent.has(node.parentId)) byParent.set(node.parentId, []);
+      byParent.get(node.parentId).push(node);
     });
+    for (const [parentId, group] of byParent.entries()) {
+      const parent = positions.get(parentId);
+      if (!parent) continue;
+      const step = depth === 2 ? 34 : depth === 3 ? 22 : 15;
+      group.forEach((node, index) => {
+        const spread = group.length === 1 ? 0 : (index - (group.length - 1) / 2) * step;
+        positions.set(node.id, {
+          x: Math.max(20, Math.min(width - 20, parent.x + spread)),
+          y: depthY[depth] || (height - 24),
+        });
+      });
+    }
   }
 
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const backdrop = svgEl("g", { class: "tree-backdrop" });
+  depthY.slice(1, Math.min(maxDepth + 1, depthY.length)).forEach((y) => {
+    backdrop.appendChild(svgEl("line", {
+      x1: 20,
+      y1: y.toFixed(1),
+      x2: (width - 20).toFixed(1),
+      y2: y.toFixed(1),
+      class: "tree-depth-line",
+    }));
+  });
+  treeSvg.appendChild(backdrop);
+
+  const curvePoint = (a, b, t) => {
+    const midY = a.y + (b.y - a.y) * 0.48;
+    const c1 = { x: a.x, y: midY };
+    const c2 = { x: b.x, y: midY };
+    const mt = 1 - t;
+    return {
+      x: mt ** 3 * a.x + 3 * mt ** 2 * t * c1.x + 3 * mt * t ** 2 * c2.x + t ** 3 * b.x,
+      y: mt ** 3 * a.y + 3 * mt ** 2 * t * c1.y + 3 * mt * t ** 2 * c2.y + t ** 3 * b.y,
+    };
+  };
+
   const edgeLayer = svgEl("g", { class: "tree-edges" });
+  const pulseLayer = svgEl("g", { class: "tree-pulses" });
   edges.forEach((edge) => {
     const a = positions.get(edge.from);
     const b = positions.get(edge.to);
     if (!a || !b) return;
+    const target = nodeById.get(edge.to);
+    const midY = a.y + (b.y - a.y) * 0.48;
     edgeLayer.appendChild(svgEl("path", {
-      d: `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} C ${a.x.toFixed(1)} ${(a.y + b.y) / 2}, ${b.x.toFixed(1)} ${(a.y + b.y) / 2}, ${b.x.toFixed(1)} ${b.y.toFixed(1)}`,
-      class: `tree-edge ${edge.principal ? "best" : edge.share > 0.45 ? "strong" : ""}`,
-      opacity: (0.34 + Math.min(0.58, edge.share * 0.72)).toFixed(2),
-      "stroke-width": (0.9 + Math.sqrt(Math.max(0.02, edge.share)) * 4.2).toFixed(2),
+      d: `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} C ${a.x.toFixed(1)} ${midY.toFixed(1)}, ${b.x.toFixed(1)} ${midY.toFixed(1)}, ${b.x.toFixed(1)} ${b.y.toFixed(1)}`,
+      class: `tree-edge depth-${target ? target.depth : 1} ${edge.principal ? "best" : edge.share > 0.45 ? "strong" : ""}`,
+      opacity: (0.24 + Math.min(0.55, edge.share * 0.7)).toFixed(2),
+      "stroke-width": (0.65 + Math.sqrt(Math.max(0.02, edge.share)) * (edge.principal ? 5.4 : 3.6)).toFixed(2),
     }));
+
+    const pulseCount = edge.principal ? 5 : edge.share > 0.25 ? 3 : 2;
+    for (let i = 0; i < pulseCount; i += 1) {
+      const p = curvePoint(a, b, (i + 1) / (pulseCount + 1));
+      const pulse = svgEl("circle", {
+        cx: p.x.toFixed(1),
+        cy: p.y.toFixed(1),
+        r: (edge.principal ? 1.9 : 1.15).toFixed(1),
+        class: `tree-pulse ${edge.principal ? "best" : ""}`,
+      });
+      pulse.setAttribute("style", `animation-delay:${(-(i * 0.22 + (target ? target.depth : 1) * 0.12)).toFixed(2)}s`);
+      pulseLayer.appendChild(pulse);
+    }
   });
   treeSvg.appendChild(edgeLayer);
+  treeSvg.appendChild(pulseLayer);
 
   const nodeLayer = svgEl("g", { class: "tree-nodes" });
   nodes.forEach((node) => {
@@ -329,15 +376,19 @@ function renderTree() {
     if (!p) return;
     const isRoot = node.depth === 0;
     const r = isRoot ? 10 : node.depth === 1
-      ? 5 + Math.sqrt(Math.max(0.01, node.share)) * 18
-      : 4 + Math.sqrt(Math.max(0.01, node.branchShare || node.share)) * 7;
+      ? 6 + Math.sqrt(Math.max(0.01, node.share)) * 18
+      : node.depth === 2
+        ? 4.5 + Math.sqrt(Math.max(0.01, node.branchShare || node.share)) * 7
+        : node.depth === 3
+          ? 2.9 + Math.sqrt(Math.max(0.01, node.branchShare || node.share)) * 4
+          : 2.4 + Math.sqrt(Math.max(0.01, node.branchShare || node.share)) * 3;
     const group = svgEl("g", {
       class: `tree-node depth-${node.depth} ${isRoot ? "root" : node.mover === 1 ? "black" : "white"} ${node.principal && !isRoot ? "best" : ""}`,
     });
     const circle = svgEl("circle", {
       cx: p.x.toFixed(1),
       cy: p.y.toFixed(1),
-      r: Math.min(node.depth === 2 ? 8 : 18, r).toFixed(1),
+      r: Math.min(node.depth >= 4 ? 4.2 : node.depth === 3 ? 5.6 : node.depth === 2 ? 8.5 : 18, r).toFixed(1),
     });
     const title = svgEl("title");
     const move = isRoot ? "当前局面" : `${node.mover === 1 ? "黑" : "白"} ${node.row + 1},${node.col + 1}`;
@@ -348,7 +399,7 @@ function renderTree() {
 
     const label = svgEl("text", {
       x: p.x.toFixed(1),
-      y: (p.y + Math.min(node.depth === 2 ? 8 : 18, r) + 13).toFixed(1),
+      y: (p.y + Math.min(node.depth >= 4 ? 4.2 : node.depth === 3 ? 5.6 : node.depth === 2 ? 8.5 : 18, r) + 13).toFixed(1),
       class: `tree-label depth-${node.depth}`,
       "text-anchor": "middle",
     });

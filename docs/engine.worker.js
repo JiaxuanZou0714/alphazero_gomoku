@@ -429,8 +429,9 @@ function searchAnalysis(root, state, elapsedMs) {
 function buildSearchTree(root, state) {
   const nodes = [];
   const edges = [];
-  const maxDepth = 2;
-  const childLimit = [5, 2];
+  const maxDepth = 5;
+  const principalChildLimit = [6, 3, 2, 2, 2];
+  const sideChildLimit = [6, 2, 1, 0, 0];
   const rootVisits = Math.max(1, root.visitCount);
 
   function addNode(
@@ -467,10 +468,12 @@ function buildSearchTree(root, state) {
     if (parentId !== null) edges.push({ from: parentId, to: id, share: branchShare, rank, principal });
 
     if (depth >= maxDepth || !node.expanded) return id;
+    const limit = principal ? principalChildLimit[depth] : sideChildLimit[depth];
+    if (!limit) return id;
     const children = [...node.children.entries()]
       .filter(([, child]) => child.visitCount > 0)
       .sort((a, b) => b[1].visitCount - a[1].visitCount)
-      .slice(0, childLimit[depth] ?? 3);
+      .slice(0, limit);
     const total = children.reduce((sum, [, child]) => sum + child.visitCount, 0) || 1;
     children.forEach(([childAction, child], index) => {
       addNode(
