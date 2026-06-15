@@ -304,5 +304,41 @@ class PresetTest(unittest.TestCase):
         self.assertFalse(eval_mcfg.forced_playouts)
 
 
+class SymmetryTest(unittest.TestCase):
+    def test_permutation_matches_rot90_flip(self) -> None:
+        from alphazero_gomoku.train import symmetry_permutations
+
+        b = 10
+        perm = symmetry_permutations(b, torch.device("cpu"))
+        self.assertEqual(perm.shape, (8, b * b))
+        torch.manual_seed(0)
+        x = torch.randn(3, 2, b, b)
+        p = torch.softmax(torch.randn(3, b * b), dim=1)
+        for k in range(8):
+            if k < 4:
+                ref_x = torch.rot90(x, k, dims=(2, 3))
+                ref_p = torch.rot90(p.view(3, b, b), k, dims=(1, 2)).reshape(3, -1)
+            else:
+                ref_x = torch.flip(torch.rot90(x, k - 4, dims=(2, 3)), dims=(3,))
+                ref_p = torch.flip(torch.rot90(p.view(3, b, b), k - 4, dims=(1, 2)), dims=(2,)).reshape(3, -1)
+            gi = perm[k]
+            got_x = torch.gather(
+                x.reshape(3, 2, b * b), 2, gi.view(1, 1, -1).expand(3, 2, b * b)
+            ).reshape(3, 2, b, b)
+            got_p = torch.gather(p, 1, gi.view(1, -1).expand(3, -1))
+            self.assertTrue(torch.equal(got_x, ref_x), f"state mismatch k={k}")
+            self.assertTrue(torch.equal(got_p, ref_p), f"policy mismatch k={k}")
+
+    def test_apply_random_symmetries_shapes_and_identity(self) -> None:
+        b = 10
+        x = torch.randn(5, 2, b, b)
+        p = torch.softmax(torch.randn(5, b * b), dim=1)
+        out_x, out_p = apply_random_symmetries(x.clone(), p.clone(), b)
+        self.assertEqual(out_x.shape, x.shape)
+        self.assertEqual(out_p.shape, p.shape)
+        # each output row is a permutation of the corresponding input policy row
+        self.assertTrue(torch.allclose(out_p.sum(1), p.sum(1), atol=1e-5))
+
+
 if __name__ == "__main__":
     unittest.main()

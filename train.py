@@ -149,6 +149,9 @@ def enable_fast_math() -> None:
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
+        # Board size and per-preset batch sizes are fixed, so cuDNN can autotune
+        # the fastest conv kernels once and reuse them every step.
+        torch.backends.cudnn.benchmark = True
         try:
             torch.set_float32_matmul_precision("high")
         except AttributeError:
@@ -657,36 +660,63 @@ def policy_entropy(policy: np.ndarray) -> float:
     return float(-(probs * np.log(probs + 1.0e-12)).sum())
 
 
+_SYM_PERM_CACHE: dict[tuple[int, str], torch.Tensor] = {}
+
+
+def symmetry_permutations(board_size: int, device: torch.device) -> torch.Tensor:
+    """Return an ``(8, board_size**2)`` LongTensor of dihedral gather indices.
+
+    Row ``k`` is the flat index permutation that, applied to a row-major
+    flattened ``board_size x board_size`` field, reproduces the same dihedral
+    transform the old per-sample loop used: ``rot90^k`` for ``k<4`` and
+    ``flip(rot90^(k-4))`` for ``k>=4``. Built by applying those transforms to an
+    index grid, so ``x_transformed = x_flat[perm[k]]`` exactly equals the
+    ``torch.rot90``/``torch.flip`` result. Cached per (board_size, device).
+    """
+    key = (board_size, str(device))
+    cached = _SYM_PERM_CACHE.get(key)
+    if cached is not None:
+        return cached
+    base = torch.arange(board_size * board_size, device=device).reshape(board_size, board_size)
+    rows = []
+    for k in range(8):
+        if k < 4:
+            t = torch.rot90(base, k, dims=(0, 1))
+        else:
+            t = torch.flip(torch.rot90(base, k - 4, dims=(0, 1)), dims=(1,))
+        rows.append(t.reshape(-1))
+    perm = torch.stack(rows, dim=0)
+    _SYM_PERM_CACHE[key] = perm
+    return perm
+
+
 def apply_random_symmetries(
     states: torch.Tensor, policies: torch.Tensor, board_size: int
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Apply an independent random dihedral symmetry to each sample in a batch.
 
-    Replaces the old 8x replay expansion: the buffer now stores raw examples
-    and the transform is applied at sampling time, so the buffer holds 8x more
-    unique positions for the same memory and the augmentation is effectively
-    infinite.
+    The buffer stores raw examples and the transform is applied at sampling
+    time, so the buffer holds 8x more unique positions for the same memory and
+    the augmentation is effectively infinite. Implemented as a single vectorised
+    gather over a precomputed index permutation (one GPU kernel) instead of a
+    Python loop of 7 masked rot90/flip passes — identical output, far less
+    per-batch overhead at large batch sizes.
     """
     n = states.shape[0]
-    pol2d = policies.view(n, board_size, board_size)
-    out_states = states.clone()
-    out_pol = pol2d.clone()
+    if n == 0:
+        return states, policies
+    area = board_size * board_size
+    channels = states.shape[1]
+    perm = symmetry_permutations(board_size, states.device)  # (8, area)
     ks = torch.randint(0, 8, (n,), device=states.device)
-    for k in range(1, 8):
-        idx = (ks == k).nonzero(as_tuple=True)[0]
-        if idx.numel() == 0:
-            continue
-        s = states[idx]
-        p = pol2d[idx]
-        if k < 4:
-            s = torch.rot90(s, k, dims=(2, 3))
-            p = torch.rot90(p, k, dims=(1, 2))
-        else:
-            s = torch.flip(torch.rot90(s, k - 4, dims=(2, 3)), dims=(3,))
-            p = torch.flip(torch.rot90(p, k - 4, dims=(1, 2)), dims=(2,))
-        out_states[idx] = s
-        out_pol[idx] = p
-    return out_states, out_pol.reshape(n, -1)
+    gather_idx = perm[ks]  # (n, area)
+    out_states = torch.gather(
+        states.reshape(n, channels, area),
+        2,
+        gather_idx.unsqueeze(1).expand(n, channels, area),
+    ).reshape(n, channels, board_size, board_size)
+    out_pol = torch.gather(policies, 1, gather_idx)
+    return out_states, out_pol
 
 
 def play_self_game(
@@ -1007,6 +1037,13 @@ def replay_to_dataset(
     policies = tensor_from_array(np.stack([item[1] for item in replay]), dtype=torch.float32)
     values = torch.tensor([item[2] for item in replay], dtype=torch.float32)
     policy_weights = torch.tensor([item[3] for item in replay], dtype=torch.float32)
+    # Validate value-label range once here (CPU, no GPU sync) rather than per
+    # batch in the train loop. Augmentation is a permutation, so labels cannot
+    # leave range between here and training.
+    if values.numel() and (float(values.min()) < -1.001 or float(values.max()) > 1.001):
+        raise RuntimeError(
+            f"value labels out of range: min={float(values.min())} max={float(values.max())}"
+        )
     dataset = TensorDataset(states, policies, values, policy_weights)
     weights = None
     if kl_buffer is not None and len(kl_buffer) == len(replay):
@@ -1174,12 +1211,8 @@ def train_epoch(
         batch_policies = batch_policies.to(cfg.device, non_blocking=True)
         batch_values = batch_values.to(cfg.device, non_blocking=True)
         batch_policy_weights = batch_policy_weights.to(cfg.device, non_blocking=True)
-
-        if batch_values.min().item() < -1.001 or batch_values.max().item() > 1.001:
-            raise RuntimeError(
-                f"value labels out of range: min={batch_values.min().item()} "
-                f"max={batch_values.max().item()}"
-            )
+        # (value-label range is validated once at dataset build in replay_to_dataset,
+        # not per batch — augmentation is a permutation and cannot push it out of range.)
         policy_sums = batch_policies.sum(dim=1)
         if not torch.isfinite(batch_policies).all() or not torch.isfinite(batch_values).all():
             raise RuntimeError("non-finite policy or value labels in replay")
@@ -1284,22 +1317,43 @@ def train_epoch(
         pred_best = logits.argmax(dim=1)
         value_correct = (torch.sign(predicted_values.detach()) == torch.sign(batch_values)).float()
         non_draw = (batch_values.abs() > 1.0e-6).float()
-
         batch_size = batch_states.shape[0]
-        pc = float(pw.sum().item())
-        totals.loss += float(loss.item()) * batch_size
-        totals.policy_loss += float(policy_loss.item()) * pc
-        totals.soft_policy_loss += float(soft_policy_loss.item()) * pc
-        totals.value_loss += float(value_loss.item()) * batch_size
-        totals.policy_kl += float(policy_kl.item()) * pc
-        totals.target_entropy += float(target_entropy.item()) * pc
-        totals.pred_entropy += float(pred_entropy.item()) * pc
-        totals.policy_top1 += float(((target_best == pred_best).float() * pw).sum().item())
-        totals.value_mae += float((predicted_values.detach() - batch_values).abs().mean().item()) * batch_size
+
+        # One host sync per step instead of ~12: stack every scalar metric and
+        # pull them across together. The values are identical to the previous
+        # per-metric .item() calls (same float32 -> float conversion), so logged
+        # metrics are unchanged; only the GPU-stall count drops.
+        m_loss, m_policy, m_soft, m_value, m_kl, m_tent, m_pent, pc, m_top1, m_mae, m_vacc, m_ndraw = (
+            torch.stack(
+                [
+                    loss.detach(),
+                    policy_loss.detach(),
+                    soft_policy_loss.detach(),
+                    value_loss.detach(),
+                    policy_kl.detach(),
+                    target_entropy.detach(),
+                    pred_entropy.detach(),
+                    pw.sum(),
+                    ((target_best == pred_best).float() * pw).sum(),
+                    (predicted_values.detach() - batch_values).abs().mean(),
+                    (value_correct * non_draw).sum(),
+                    non_draw.sum(),
+                ]
+            ).tolist()
+        )
+        totals.loss += m_loss * batch_size
+        totals.policy_loss += m_policy * pc
+        totals.soft_policy_loss += m_soft * pc
+        totals.value_loss += m_value * batch_size
+        totals.policy_kl += m_kl * pc
+        totals.target_entropy += m_tent * pc
+        totals.pred_entropy += m_pent * pc
+        totals.policy_top1 += m_top1
+        totals.value_mae += m_mae * batch_size
         # value_acc is a rate over non-draw positions only, so weight it by the
         # non-draw count (not batch_size) to avoid biasing draw-heavy batches.
-        totals.value_acc += float((value_correct * non_draw).sum().item())
-        value_acc_count += float(non_draw.sum().item())
+        totals.value_acc += m_vacc
+        value_acc_count += m_ndraw
         totals.grad_norm += grad_norm_value * batch_size
         totals.batches += batch_size
         policy_samples += pc
@@ -1704,6 +1758,12 @@ def run_training(cfg: TrainConfig) -> None:
     if cfg.self_play_workers > 1 or cfg.eval_workers > 1:
         limit_worker_threads()
     cfg.device = resolve_device(cfg.device)
+    # Train-time AMP defaults to bf16 on CUDA (Tensor Cores, no GradScaler needed;
+    # the loss math already up-casts to fp32). CPU stays "none". Explicit non-"none"
+    # amp_dtype is respected.
+    if cfg.amp and cfg.device.startswith("cuda") and cfg.amp_dtype == "none":
+        cfg.amp_dtype = "bf16"
+        print("config_auto amp_dtype=bf16 reason=cuda_amp_enabled", flush=True)
     print(f"device={cfg.device}")
     base_model = make_model(cfg).to(cfg.device)
     model: torch.nn.Module = base_model
