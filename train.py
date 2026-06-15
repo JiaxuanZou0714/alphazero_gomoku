@@ -43,6 +43,8 @@ class TrainConfig:
     epochs: int = 2
     train_steps_per_iteration: int = 0
     batch_size: int = 64
+    train_data_workers: int = 0
+    train_prefetch_factor: int = 2
     replay_size: int = 10_000
     min_replay_size: int = 0
     max_train_replay_passes: float = 0.0
@@ -92,6 +94,8 @@ class TrainConfig:
     eval_simulations: int = 128
     eval_opening_moves: int = 2         # random opening plies per eval game pair (colors swapped)
     eval_progress_interval: int = 1
+    eval_workers: int = 1
+    eval_devices: str = "auto"
     eval_early_cutoff: bool = False
     promotion_threshold: float = 0.55
     gate_evaluation: bool = False
@@ -282,6 +286,8 @@ def preset_config(name: str) -> TrainConfig:
         cfg.eval_simulations = 512
         cfg.eval_opening_moves = 4
         cfg.eval_progress_interval = 1
+        cfg.eval_workers = 8
+        cfg.train_data_workers = 2
         cfg.eval_early_cutoff = True
         cfg.promotion_threshold = 0.55
         cfg.early_stop_evals = 4
@@ -338,6 +344,7 @@ def preset_config(name: str) -> TrainConfig:
         cfg.eval_simulations = 256
         cfg.eval_opening_moves = 4
         cfg.eval_progress_interval = 1
+        cfg.eval_workers = 4
         cfg.eval_early_cutoff = True
         cfg.promotion_threshold = 0.55
         cfg.gate_evaluation = True
@@ -394,6 +401,8 @@ def preset_config(name: str) -> TrainConfig:
         cfg.eval_simulations = 256
         cfg.eval_opening_moves = 4
         cfg.eval_progress_interval = 1
+        cfg.eval_workers = 8
+        cfg.train_data_workers = 2
         cfg.eval_early_cutoff = True
         cfg.promotion_threshold = 0.55
         cfg.gate_evaluation = True
@@ -451,6 +460,8 @@ def preset_config(name: str) -> TrainConfig:
         cfg.eval_interval = 5
         cfg.eval_games = 16
         cfg.eval_simulations = 128
+        cfg.eval_workers = 8
+        cfg.train_data_workers = 2
         cfg.promotion_threshold = 0.55
         cfg.early_stop_evals = 3            # stop after 3 failed evals (15 stagnant iterations)
         return cfg
@@ -486,6 +497,8 @@ def preset_config(name: str) -> TrainConfig:
         cfg.eval_interval = 5
         cfg.eval_games = 32
         cfg.eval_simulations = 192
+        cfg.eval_workers = 16
+        cfg.train_data_workers = 2
         cfg.promotion_threshold = 0.55
         return cfg
     if name == "a100-fast":
@@ -515,6 +528,7 @@ def preset_config(name: str) -> TrainConfig:
         cfg.self_play_workers = 16
         cfg.self_play_devices = "auto"
         cfg.data_parallel = False
+        cfg.train_data_workers = 2
         return cfg
     if name == "a100-turbo":
         cfg.iterations = 12
@@ -543,6 +557,7 @@ def preset_config(name: str) -> TrainConfig:
         cfg.self_play_workers = 16
         cfg.self_play_devices = "auto"
         cfg.data_parallel = False
+        cfg.train_data_workers = 2
         return cfg
     raise ValueError(f"unknown preset: {name}")
 
@@ -627,7 +642,9 @@ def save_replay(replay: deque[Example], kl_buffer: deque[float], path: str) -> N
         return
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"version": 2, "examples": list(replay), "kl": list(kl_buffer)}, target)
+    tmp = target.with_name(f"{target.name}.tmp")
+    torch.save({"version": 2, "examples": list(replay), "kl": list(kl_buffer)}, tmp)
+    tmp.replace(target)
     print(f"replay_saved path={target} examples={len(replay)}", flush=True)
 
 
@@ -1014,6 +1031,7 @@ def collect_self_play_examples(
                     f"examples={len(examples)} policy_entropy={stats['policy_entropy']:.3f}",
                     flush=True,
                 )
+    shutil.rmtree(snapshot_dir, ignore_errors=True)
     return all_examples, all_kl_surprises, all_lengths, merge_stats(all_stats)
 
 
@@ -1069,6 +1087,15 @@ def train_epoch(
     # buffer smaller than one batch it would yield an empty loader and skip the
     # iteration entirely — fall back to whatever batch the data can fill.
     drop_last = cfg.train_steps_per_iteration > 0 and len(dataset) >= cfg.batch_size
+    loader_kwargs = {
+        "batch_size": cfg.batch_size,
+        "pin_memory": cfg.device.startswith("cuda"),
+        "num_workers": max(0, cfg.train_data_workers),
+        "drop_last": drop_last,
+    }
+    if cfg.train_data_workers > 0:
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = max(1, cfg.train_prefetch_factor)
     if use_weighted:
         from torch.utils.data import WeightedRandomSampler
         sampler = WeightedRandomSampler(
@@ -1078,20 +1105,14 @@ def train_epoch(
         )
         loader = DataLoader(
             dataset,
-            batch_size=cfg.batch_size,
             sampler=sampler,
-            pin_memory=cfg.device.startswith("cuda"),
-            num_workers=0,
-            drop_last=drop_last,
+            **loader_kwargs,
         )
     else:
         loader = DataLoader(
             dataset,
-            batch_size=cfg.batch_size,
             shuffle=True,
-            pin_memory=cfg.device.startswith("cuda"),
-            num_workers=0,
-            drop_last=drop_last,
+            **loader_kwargs,
         )
 
     model.train()
@@ -1338,6 +1359,57 @@ def random_opening(cfg: TrainConfig, rng: random.Random) -> list[int]:
     return opening
 
 
+def play_eval_game_worker(
+    cfg_data: dict,
+    candidate_state_path: str,
+    baseline_state_path: str,
+    jobs: list[tuple[int, list[int], int]],
+    device: str,
+    iteration: int = 0,
+) -> list[dict[str, object]]:
+    limit_worker_threads()
+    enable_fast_math()
+    cfg = TrainConfig(**cfg_data)
+    cfg.device = device
+
+    candidate = make_model(cfg).to(device)
+    baseline = make_model(cfg).to(device)
+    candidate.load_state_dict(load_torch(candidate_state_path, map_location="cpu"))
+    baseline.load_state_dict(load_torch(baseline_state_path, map_location="cpu"))
+    candidate.eval()
+    baseline.eval()
+
+    results: list[dict[str, object]] = []
+    for game_index, opening, candidate_player in jobs:
+        set_seed(cfg.seed + 50_000 + iteration * 1_000 + game_index)
+        state = GomokuState.new(size=cfg.board_size, win_length=cfg.win_length)
+        for action in opening:
+            state = state.apply(action)
+        while not state.is_terminal:
+            if state.current_player == candidate_player:
+                action = select_mcts_action(candidate, state, cfg.eval_simulations, device, cfg)
+            else:
+                action = select_mcts_action(baseline, state, cfg.eval_simulations, device, cfg)
+            state = state.apply(action)
+
+        if state.winner == 0:
+            outcome = "draw"
+        elif state.winner == candidate_player:
+            outcome = "candidate"
+        else:
+            outcome = "baseline"
+        results.append(
+            {
+                "game_index": game_index,
+                "candidate_player": candidate_player,
+                "outcome": outcome,
+                "moves": state.moves_played,
+                "device": device,
+            }
+        )
+    return results
+
+
 def evaluate_candidate(
     candidate: PolicyValueNet,
     baseline: PolicyValueNet | None,
@@ -1374,11 +1446,129 @@ def evaluate_candidate(
         f"eval_start{iter_label} games={cfg.eval_games} "
         f"simulations={cfg.eval_simulations} opening_moves={cfg.eval_opening_moves} "
         f"threshold={cfg.promotion_threshold:.3f} "
-        f"early_cutoff={cfg.eval_early_cutoff}",
+        f"early_cutoff={cfg.eval_early_cutoff} "
+        f"workers={cfg.eval_workers} devices={split_devices(cfg.eval_devices, cfg.device)}",
         flush=True,
     )
     candidate.eval()
     baseline.eval()
+
+    if cfg.eval_workers > 1:
+        worker_count = min(max(1, cfg.eval_workers), cfg.eval_games)
+        devices = split_devices(cfg.eval_devices, cfg.device)
+        game_counts = distribute_games(cfg.eval_games, worker_count)
+        game_jobs: list[list[tuple[int, list[int], int]]] = []
+        next_game = 0
+        for count in game_counts:
+            jobs: list[tuple[int, list[int], int]] = []
+            for _ in range(count):
+                jobs.append(
+                    (
+                        next_game,
+                        openings[next_game // 2],
+                        1 if next_game % 2 == 0 else -1,
+                    )
+                )
+                next_game += 1
+            game_jobs.append(jobs)
+        worker_devices = [devices[index % len(devices)] for index in range(worker_count)]
+        snapshot_dir = (
+            Path(cfg.checkpoint_dir)
+            / "_eval_tmp"
+            / f"iter_{iteration or 0:04d}_{int(time.time() * 1000)}"
+        )
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        candidate_state_path = str(snapshot_dir / "candidate.pt")
+        baseline_state_path = str(snapshot_dir / "baseline.pt")
+        torch.save(cpu_state_dict(candidate), candidate_state_path)
+        torch.save(cpu_state_dict(baseline), baseline_state_path)
+        cfg_data = asdict(cfg)
+        context = mp.get_context("spawn")
+        wins = losses = draws = played = 0
+        if cfg.eval_early_cutoff:
+            print(
+                f"eval_parallel{iter_label} early_cutoff_disabled=true "
+                f"reason=all_games_already_dispatched",
+                flush=True,
+            )
+        if sys.platform == "win32":
+            executor_context = concurrent.futures.ThreadPoolExecutor(max_workers=worker_count)
+        else:
+            executor_context = concurrent.futures.ProcessPoolExecutor(
+                max_workers=worker_count, mp_context=context
+            )
+        with executor_context as executor:
+            futures = [
+                executor.submit(
+                    play_eval_game_worker,
+                    cfg_data,
+                    candidate_state_path,
+                    baseline_state_path,
+                    jobs,
+                    worker_devices[worker_id],
+                    iteration or 0,
+                )
+                for worker_id, jobs in enumerate(game_jobs)
+                if jobs
+            ]
+            pending = set(futures)
+            while pending:
+                done, pending = concurrent.futures.wait(
+                    pending,
+                    timeout=30,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                if not done:
+                    print(
+                        f"eval_wait{iter_label} games={played}/{cfg.eval_games} "
+                        f"elapsed={format_duration(time.monotonic() - eval_start)}",
+                        flush=True,
+                    )
+                    continue
+                for future in done:
+                    for result in future.result():
+                        outcome = str(result["outcome"])
+                        if outcome == "draw":
+                            draws += 1
+                        elif outcome == "candidate":
+                            wins += 1
+                        else:
+                            losses += 1
+                        played += 1
+                        score = wins + 0.5 * draws
+                        candidate_player = int(result["candidate_player"])
+                        if cfg.eval_progress_interval > 0 and (
+                            played % cfg.eval_progress_interval == 0
+                            or played == cfg.eval_games
+                        ):
+                            print(
+                                f"eval_game{iter_label} game={played}/{cfg.eval_games} "
+                                f"source_game={int(result['game_index']) + 1} "
+                                f"device={result['device']} "
+                                f"candidate_color={'black' if candidate_player == 1 else 'white'} "
+                                f"outcome={outcome} moves={int(result['moves'])} "
+                                f"score={score / max(1, cfg.eval_games):.3f} "
+                                f"wins={wins} losses={losses} draws={draws} "
+                                f"elapsed={format_duration(time.monotonic() - eval_start)}",
+                                flush=True,
+                            )
+        win_rate = (wins + 0.5 * draws) / max(1, cfg.eval_games)
+        print(
+            f"eval_done{iter_label} played={played}/{cfg.eval_games} "
+            f"score={win_rate:.3f} wins={wins} losses={losses} draws={draws} "
+            f"early_cutoff=False elapsed={format_duration(time.monotonic() - eval_start)}",
+            flush=True,
+        )
+        shutil.rmtree(snapshot_dir, ignore_errors=True)
+        return {
+            "win_rate": float(win_rate),
+            "wins": float(wins),
+            "losses": float(losses),
+            "draws": float(draws),
+            "games": float(played),
+            "early_cutoff": 0.0,
+        }
+
     wins = losses = draws = 0
     played = 0
     early_cutoff = False
@@ -1464,6 +1654,7 @@ def save_checkpoint(
     checkpoint_dir = Path(cfg.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     path = checkpoint_dir / f"gomoku10_iter_{iteration:04d}.pt"
+    tmp = path.with_name(f"{path.name}.tmp")
     torch.save(
         {
             "model": model.state_dict(),
@@ -1473,8 +1664,9 @@ def save_checkpoint(
             "iteration": iteration,
             "stats": asdict(stats) if stats is not None else None,
         },
-        path,
+        tmp,
     )
+    tmp.replace(path)
     return path
 
 
@@ -1485,7 +1677,7 @@ def best_checkpoint_path(cfg: TrainConfig) -> Path:
 def run_training(cfg: TrainConfig) -> None:
     set_seed(cfg.seed)
     enable_fast_math()
-    if cfg.self_play_workers > 1:
+    if cfg.self_play_workers > 1 or cfg.eval_workers > 1:
         limit_worker_threads()
     cfg.device = resolve_device(cfg.device)
     print(f"device={cfg.device}")
@@ -1512,6 +1704,8 @@ def run_training(cfg: TrainConfig) -> None:
         f"mcts_batch_size={cfg.mcts_batch_size} epochs={cfg.epochs} "
         f"train_steps_per_iteration={cfg.train_steps_per_iteration} "
         f"batch_size={cfg.batch_size} replay_size={cfg.replay_size} "
+        f"train_data_workers={cfg.train_data_workers} "
+        f"train_prefetch_factor={cfg.train_prefetch_factor} "
         f"lr={cfg.learning_rate} min_lr={cfg.min_learning_rate} "
         f"lr_schedule={cfg.lr_schedule} warmup_iterations={cfg.warmup_iterations} "
         f"mcts_c_puct={cfg.mcts_c_puct} "
@@ -1521,6 +1715,8 @@ def run_training(cfg: TrainConfig) -> None:
         f"policy_channels={cfg.policy_channels} value_channels={cfg.value_channels} "
         f"value_hidden={cfg.value_hidden} use_se={cfg.use_se} "
         f"augment_symmetries={cfg.augment_symmetries} "
+        f"eval_workers={cfg.eval_workers} "
+        f"eval_devices={split_devices(cfg.eval_devices, cfg.device)} "
         f"amp={cfg.amp} amp_dtype={cfg.amp_dtype} mcts_amp_dtype={cfg.mcts_amp_dtype} "
         f"metrics_path={cfg.metrics_path or 'none'}",
         flush=True,
@@ -1692,7 +1888,9 @@ def run_training(cfg: TrainConfig) -> None:
         if update_best:
             best_path = best_checkpoint_path(cfg)
             best_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(checkpoint, best_path)
+            tmp_best = best_path.with_name(f"{best_path.name}.tmp")
+            shutil.copyfile(checkpoint, tmp_best)
+            tmp_best.replace(best_path)
         if cfg.replay_path and cfg.replay_save_interval > 0 and iteration % cfg.replay_save_interval == 0:
             save_replay(replay, kl_buffer, cfg.replay_path)
 
@@ -1804,6 +2002,8 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--epochs", type=int, default=defaults.epochs)
     parser.add_argument("--train-steps-per-iteration", type=int, default=defaults.train_steps_per_iteration)
     parser.add_argument("--batch-size", type=int, default=defaults.batch_size)
+    parser.add_argument("--train-data-workers", type=int, default=defaults.train_data_workers)
+    parser.add_argument("--train-prefetch-factor", type=int, default=defaults.train_prefetch_factor)
     parser.add_argument("--replay-size", type=int, default=defaults.replay_size)
     parser.add_argument("--min-replay-size", type=int, default=defaults.min_replay_size)
     parser.add_argument("--max-train-replay-passes", type=float, default=defaults.max_train_replay_passes)
@@ -1869,6 +2069,8 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--eval-simulations", type=int, default=defaults.eval_simulations)
     parser.add_argument("--eval-opening-moves", type=int, default=defaults.eval_opening_moves)
     parser.add_argument("--eval-progress-interval", type=int, default=defaults.eval_progress_interval)
+    parser.add_argument("--eval-workers", type=int, default=defaults.eval_workers)
+    parser.add_argument("--eval-devices", default=defaults.eval_devices)
     parser.add_argument("--eval-early-cutoff", dest="eval_early_cutoff", action="store_true")
     parser.add_argument("--no-eval-early-cutoff", dest="eval_early_cutoff", action="store_false")
     parser.add_argument("--early-stop-evals", type=int, default=defaults.early_stop_evals)
