@@ -1743,32 +1743,8 @@ def best_checkpoint_path(cfg: TrainConfig) -> Path:
     return Path(cfg.checkpoint_dir) / "gomoku10_best.pt"
 
 
-def run_training(cfg: TrainConfig) -> None:
-    set_seed(cfg.seed)
-    enable_fast_math()
-    if cfg.self_play_workers > 1 or cfg.eval_workers > 1:
-        limit_worker_threads()
-    cfg.device = resolve_device(cfg.device)
-    # Train-time AMP defaults to bf16 on CUDA (Tensor Cores, no GradScaler needed;
-    # the loss math already up-casts to fp32). CPU stays "none". Explicit non-"none"
-    # amp_dtype is respected.
-    if cfg.amp and cfg.device.startswith("cuda") and cfg.amp_dtype == "none":
-        cfg.amp_dtype = "bf16"
-        print("config_auto amp_dtype=bf16 reason=cuda_amp_enabled", flush=True)
-    print(f"device={cfg.device}")
-    base_model = make_model(cfg).to(cfg.device)
-    model: torch.nn.Module = base_model
-    if cfg.compile_model and hasattr(torch, "compile"):
-        try:
-            model = torch.compile(model)
-            print("model_compiled=true", flush=True)
-        except Exception as exc:
-            print(f"model_compile_warning error={exc}", flush=True)
-            model = base_model
-    if cfg.data_parallel and cfg.device.startswith("cuda") and torch.cuda.device_count() > 1:
-        device_ids = list(range(torch.cuda.device_count()))
-        model = torch.nn.DataParallel(model, device_ids=device_ids)
-        print(f"training_data_parallel={device_ids}")
+def _log_run_config(cfg: TrainConfig) -> None:
+    """Print the self-play worker layout and the full hyperparameter banner."""
     print(
         f"self_play_workers={cfg.self_play_workers} "
         f"self_play_devices={split_devices(cfg.self_play_devices, cfg.device)}"
@@ -1796,6 +1772,35 @@ def run_training(cfg: TrainConfig) -> None:
         f"metrics_path={cfg.metrics_path or 'none'}",
         flush=True,
     )
+
+
+def run_training(cfg: TrainConfig) -> None:
+    set_seed(cfg.seed)
+    enable_fast_math()
+    if cfg.self_play_workers > 1 or cfg.eval_workers > 1:
+        limit_worker_threads()
+    cfg.device = resolve_device(cfg.device)
+    # Train-time AMP defaults to bf16 on CUDA (Tensor Cores, no GradScaler needed;
+    # the loss math already up-casts to fp32). CPU stays "none". Explicit non-"none"
+    # amp_dtype is respected.
+    if cfg.amp and cfg.device.startswith("cuda") and cfg.amp_dtype == "none":
+        cfg.amp_dtype = "bf16"
+        print("config_auto amp_dtype=bf16 reason=cuda_amp_enabled", flush=True)
+    print(f"device={cfg.device}")
+    base_model = make_model(cfg).to(cfg.device)
+    model: torch.nn.Module = base_model
+    if cfg.compile_model and hasattr(torch, "compile"):
+        try:
+            model = torch.compile(model)
+            print("model_compiled=true", flush=True)
+        except Exception as exc:
+            print(f"model_compile_warning error={exc}", flush=True)
+            model = base_model
+    if cfg.data_parallel and cfg.device.startswith("cuda") and torch.cuda.device_count() > 1:
+        device_ids = list(range(torch.cuda.device_count()))
+        model = torch.nn.DataParallel(model, device_ids=device_ids)
+        print(f"training_data_parallel={device_ids}")
+    _log_run_config(cfg)
     optimizer = torch.optim.AdamW(
         unwrap_model(model).parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay
     )
