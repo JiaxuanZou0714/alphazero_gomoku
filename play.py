@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from .game import GomokuState
-from .mcts import MCTS, MCTSConfig, visit_count_policy
+from .inference import greedy_action, mcts_config_from_cfg
 from .utils import load_model, resolve_device
 
 
@@ -33,24 +33,7 @@ def main() -> None:
         size=int(cfg.get("board_size", 10)), win_length=int(cfg.get("win_length", 5))
     )
     human_player = -1
-    mcts = MCTS(
-        model,
-        MCTSConfig(
-            simulations=args.simulations,
-            c_puct=float(cfg.get("mcts_c_puct", 1.5)),
-            dirichlet_alpha=float(cfg.get("mcts_dirichlet_alpha", 0.3)),
-            dirichlet_fraction=float(cfg.get("mcts_dirichlet_fraction", 0.25)),
-            eval_batch_size=min(int(cfg.get("mcts_batch_size", 1)), max(1, args.simulations)),
-            amp_dtype=str(
-                cfg.get(
-                    "mcts_amp_dtype",
-                    str(cfg.get("amp_dtype", "bf16")) if bool(cfg.get("amp", True)) else "none",
-                )
-            ),
-            fpu_reduction=float(cfg.get("mcts_fpu_reduction", 0.0) or 0.0),
-        ),
-        device=args.device,
-    )
+    mcts_cfg = mcts_config_from_cfg(cfg, args.simulations, for_eval=True)
 
     while not state.is_terminal:
         print(state.render())
@@ -62,9 +45,7 @@ def main() -> None:
                 except (ValueError, IndexError) as exc:
                     print(f"Invalid move: {exc}")
         else:
-            root = mcts.search(state)
-            policy = visit_count_policy(root, state.action_size, temperature=0.0)
-            action = int(policy.argmax())
+            action = greedy_action(model, mcts_cfg, state, args.device)
             row, col = state.action_to_coord(action)
             print(f"AI move: {row + 1} {col + 1}")
         state = state.apply(action)

@@ -15,10 +15,10 @@
 
 - 状态：`baseline`
 - 目标：建立当前最强的已验证基线模型。
-- 起点/产物：`outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt`
+- 起点/产物：`outputs/checkpoints/v1-old-best/gomoku10_best.pt`（晋升的是第 `95` 轮的 best，共训练 `100` 轮）
 - 关键改动：A100 训练 `100` 轮，中间 resume 两次；使用较大的 `192x12` 网络；引入 global context、soft policy head、MCTS value target、dynamic cPUCT、FPU、forced playouts、playout cap randomization 等 KataGo-style 改进。
 - 结果：成为后续所有实验的默认比较对象。
-- 结论：继续作为正式 baseline，除非新模型通过足够大的 head-to-head 评估。目录名 `a100-4-prod-v3` 是历史命名，不代表它属于 v3。
+- 结论：继续作为正式 baseline，除非新模型通过足够大的 head-to-head 评估。（历史目录名曾为 `a100-4-prod-v3`，已重命名为 `v1-old-best` 以消除与 v3 的混淆。）
 
 ## v2
 
@@ -51,7 +51,7 @@
 
 - 状态：`active`
 - 目标：让轻量 student 进入大规模 KataGo-style RL，尝试超过 old best。
-- 起点/产物：`--preset v3-student-local`、`outputs/checkpoints/v3-student-local/`、`outputs/metrics/v3-student-local.jsonl`
+- 起点/产物：`--preset v3-student-local`、`outputs/checkpoints/v3-student-local/`。本地训练指标写入 `outputs/metrics/v3-student-local.jsonl`；远端 A100 跑出的同一 preset 曲线归档在 `outputs/metrics/v3-student-a100-final.jsonl` 与 `outputs/plots/v3-student-a100-final/`（README 展示的就是这份远端曲线，对应的冠军即 `v3-student-local/gomoku10_best.pt`）。
 - 关键改动：从 `distill-oldbest-128x8` 启动；每轮 `96` 盘 self-play；replay 达到 `25k` 原始局面后开始训练；每轮最多扫 replay `2` 遍；每 5 轮做 champion gate eval。
 - 结果：基础设施优化后训练流程健康；`gomoku10_best.pt` 对应第 `90` 轮。对 v1 / old best 的 `128 sims` 复核为 `54-10-0`，score `0.84375`。
 - 结论：当前主线，已在 `128 sims` 设置下明显超过 old best；正式替代前仍建议补更高 sims 和更大样本评估。

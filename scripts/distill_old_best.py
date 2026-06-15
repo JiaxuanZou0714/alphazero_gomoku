@@ -20,11 +20,11 @@ if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
 
 from alphazero_gomoku.game import GomokuState
-from alphazero_gomoku.mcts import MCTS, MCTSConfig
-from alphazero_gomoku.model import build_model_from_config
+from alphazero_gomoku.inference import mcts_config_from_cfg
+from alphazero_gomoku.model import build_model_from_config, model_kwargs_from_config
 from alphazero_gomoku.torch_compat import tensor_from_array
-from alphazero_gomoku.train import TrainConfig, architecture_from_config, cpu_state_dict, format_duration
-from alphazero_gomoku.utils import load_model, resolve_device
+from alphazero_gomoku.train import TrainConfig
+from alphazero_gomoku.utils import cpu_state_dict, format_duration, load_model, resolve_device
 
 
 def default_path(*parts: str) -> Path:
@@ -79,20 +79,7 @@ def teacher_mcts_target(
 ) -> tuple[np.ndarray, float]:
     search = MCTS(
         teacher,
-        MCTSConfig(
-            simulations=simulations,
-            c_puct=float(teacher_cfg.get("mcts_c_puct", 1.5)),
-            dirichlet_alpha=float(teacher_cfg.get("mcts_dirichlet_alpha", 0.3)),
-            dirichlet_fraction=float(teacher_cfg.get("mcts_dirichlet_fraction", 0.25)),
-            eval_batch_size=min(int(teacher_cfg.get("mcts_batch_size", 32)), simulations),
-            amp_dtype=str(teacher_cfg.get("mcts_amp_dtype", "bf16")),
-            root_policy_temp=float(teacher_cfg.get("mcts_root_policy_temp", 1.0)),
-            shaped_dirichlet=bool(teacher_cfg.get("mcts_shaped_dirichlet", False)),
-            dynamic_cpuct=bool(teacher_cfg.get("mcts_dynamic_cpuct", False)),
-            fpu_reduction=float(teacher_cfg.get("mcts_fpu_reduction", 0.0) or 0.0),
-            forced_playouts=bool(teacher_cfg.get("mcts_forced_playouts", False)),
-            forced_playout_k=float(teacher_cfg.get("mcts_forced_playout_k", 2.0)),
-        ),
+        mcts_config_from_cfg(teacher_cfg, simulations),
         device=device,
     )
     root = search.search(state, add_exploration_noise=False)
@@ -233,7 +220,7 @@ def save_student_checkpoint(
             "model": cpu_state_dict(student),
             "optimizer": optimizer.state_dict(),
             "config": config,
-            "model_kwargs": architecture_from_config(cfg),
+            "model_kwargs": model_kwargs_from_config(asdict(cfg)),
             "iteration": epoch,
             "stats": stats,
         },
@@ -380,7 +367,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--teacher",
         type=Path,
-        default=default_path("outputs", "checkpoints", "a100-4-prod-v3", "gomoku10_best.pt"),
+        default=default_path("outputs", "checkpoints", "v1-old-best", "gomoku10_best.pt"),
     )
     parser.add_argument(
         "--checkpoint-dir",
@@ -454,7 +441,7 @@ def main() -> None:
     print(
         "distill_start "
         f"teacher={args.teacher} device={device} games={args.games} "
-        f"student_arch={architecture_from_config(cfg)}",
+        f"student_arch={model_kwargs_from_config(asdict(cfg))}",
         flush=True,
     )
     states, masks, policies, values, metadata = generate_distill_examples(

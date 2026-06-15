@@ -13,12 +13,17 @@ import torch
 from alphazero_gomoku.mcts import MCTSConfig
 from alphazero_gomoku.model import PolicyValueNet
 from alphazero_gomoku.train import (
+    PRESETS,
     TrainConfig,
     apply_random_symmetries,
+    build_train_loader,
+    compute_step_losses,
     evaluate_candidate,
     effective_train_steps,
     load_replay,
+    mcts_config_from_train,
     play_self_game,
+    preset_config,
     random_opening,
     replay_to_dataset,
     run_training,
@@ -236,6 +241,67 @@ class ReplayRoundTripTest(unittest.TestCase):
             self.assertEqual(len(kl_buffer), 4)
             # legacy examples get policy_weight=1.0 appended
             self.assertEqual(replay[0][3], 1.0)
+
+
+class StepLossTest(unittest.TestCase):
+    def test_compute_step_losses_matches_manual_cross_entropy(self) -> None:
+        torch.manual_seed(0)
+        logits = torch.randn(4, 100)
+        policies = torch.softmax(torch.randn(4, 100), dim=1)
+        values = torch.tensor([1.0, -1.0, 0.0, 1.0])
+        predicted = torch.zeros(4)
+        pw = torch.ones(4)
+        cfg = TrainConfig()
+        parts = compute_step_losses(logits, None, predicted, policies, values, pw, cfg)
+        # policy_loss is the (pw-weighted) cross-entropy of policies vs softmax(logits)
+        expected = -(policies * torch.log_softmax(logits, dim=1)).sum(dim=1).mean()
+        self.assertAlmostEqual(float(parts.policy_loss), float(expected), places=5)
+        self.assertEqual(float(parts.soft_policy_loss), 0.0)  # no soft head
+        self.assertTrue(torch.isfinite(parts.loss))
+
+    def test_policy_weight_zero_excludes_value_only_samples(self) -> None:
+        torch.manual_seed(1)
+        logits = torch.randn(2, 100)
+        policies = torch.softmax(torch.randn(2, 100), dim=1)
+        values = torch.zeros(2)
+        predicted = torch.zeros(2)
+        cfg = TrainConfig()
+        # Second sample is value-only (pw=0): policy_loss must equal the first row alone.
+        pw = torch.tensor([1.0, 0.0])
+        parts = compute_step_losses(logits, None, predicted, policies, values, pw, cfg)
+        row0 = -(policies[0] * torch.log_softmax(logits, dim=1)[0]).sum()
+        self.assertAlmostEqual(float(parts.policy_loss), float(row0), places=5)
+
+
+class LoaderTest(unittest.TestCase):
+    def test_build_train_loader_yields_expected_batch(self) -> None:
+        dataset, _ = replay_to_dataset(deque(make_examples(8)))
+        cfg = TrainConfig(batch_size=4)
+        loader = build_train_loader(dataset, None, cfg)
+        states, policies, values, weights = next(iter(loader))
+        self.assertEqual(states.shape, (4, 2, 10, 10))
+        self.assertEqual(policies.shape, (4, 100))
+        self.assertEqual(values.shape, (4,))
+        self.assertEqual(weights.shape, (4,))
+
+
+class PresetTest(unittest.TestCase):
+    def test_all_presets_build(self) -> None:
+        for name in PRESETS:
+            cfg = preset_config(name)
+            self.assertEqual(cfg.preset, name)
+            self.assertGreater(cfg.iterations, 0)
+
+    def test_unknown_preset_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            preset_config("does-not-exist")
+
+    def test_mcts_config_for_eval_omits_forced_playouts(self) -> None:
+        cfg = preset_config("v3-student-local")  # has forced playouts on
+        train_mcfg = mcts_config_from_train(cfg, 64, for_eval=False)
+        eval_mcfg = mcts_config_from_train(cfg, 64, for_eval=True)
+        self.assertTrue(train_mcfg.forced_playouts)
+        self.assertFalse(eval_mcfg.forced_playouts)
 
 
 if __name__ == "__main__":

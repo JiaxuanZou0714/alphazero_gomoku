@@ -1,0 +1,12 @@
+numpy
+torch
+
+[dev]
+matplotlib
+onnx
+
+[export]
+onnx
+
+[plot]
+matplotlib

@@ -4,7 +4,7 @@ The v2 remote run is kept as a failed continuation experiment.
 
 Summary:
 
-- Baseline: `outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt`
+- Baseline: `outputs/checkpoints/v1-old-best/gomoku10_best.pt` (= v1 / old best)
 - Remote baseline alias: `/home/featurize/alphazero_gomoku/outputs/checkpoints/gomoku10_best_old.pt`
 - v2 checkpoints tested: `gomoku10_iter_0096.pt` through `gomoku10_iter_0112.pt`
 - Result: v2 did not reliably beat the old best.

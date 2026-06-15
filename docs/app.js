@@ -66,33 +66,26 @@ let pendingEvalKey = null;
 let d3Tree = null;
 let d3TreeError = false;
 let d3TreePromise = null;
-let mermaidReady = false;
-let mermaidError = false;
-let mermaidPromise = null;
 let renderedNetworkKey = "";
+let modelCatalog = null;
 const pending = new Map();
+
+const SEARCH_HEAT = getComputedStyle(document.documentElement)
+  .getPropertyValue("--search-heat").trim().replaceAll(" ", ",");
+const POLICY_HEAT = getComputedStyle(document.documentElement)
+  .getPropertyValue("--policy-heat").trim().replaceAll(" ", ",");
 
 const worker = new Worker(`./engine.worker.js?v=${APP_VERSION}`);
 
 const SIMULATION_OPTIONS = [16, 32, 64, 128, 256, 512, 1024, 2048];
-function networkDiagramSource(model) {
+function networkDiagramConfig(model) {
   const cfg = model && model.config ? model.config : {};
-  const channels = cfg.channels || 128;
-  const blocks = cfg.residual_blocks || 8;
-  const policyChannels = cfg.policy_channels || 12;
-  const valueHidden = cfg.value_hidden || 384;
-  return String.raw`
-flowchart LR
-  input["棋盘输入<br/>黑 / 白两层"]
-  stem["卷积特征<br/>${channels} 通道"]
-  tower["残差塔<br/>${blocks} 块"]
-  policy["落点倾向<br/>${policyChannels} 通道头"]
-  value["局面评估<br/>hidden ${valueHidden}"]
-  mcts["MCTS<br/>反复搜索"]
-  input --> stem --> tower
-  tower --> policy --> mcts
-  tower --> value --> mcts
-`;
+  return {
+    channels: cfg.channels || 128,
+    blocks: cfg.residual_blocks || 8,
+    policyChannels: cfg.policy_channels || 12,
+    valueHidden: cfg.value_hidden || 384,
+  };
 }
 const playerName = (v) => (v === 1 ? "黑" : v === -1 ? "白" : "-");
 const pct = (v, digits = 0) => `${(v * 100).toFixed(digits)}%`;
@@ -260,6 +253,10 @@ worker.addEventListener("message", (event) => {
     loadText.textContent = msg.payload.label;
     return;
   }
+  if (msg.type === "info") {
+    showToast(msg.payload.message);
+    return;
+  }
   if (msg.id && pending.has(msg.id)) {
     const { resolve, reject } = pending.get(msg.id);
     pending.delete(msg.id);
@@ -269,7 +266,11 @@ worker.addEventListener("message", (event) => {
 });
 
 worker.addEventListener("error", (event) => {
-  showToast(event.message || "Worker 运行失败");
+  const message = event.message || "Worker 运行失败";
+  showToast(message);
+  // Reject every in-flight request so callers' awaits don't hang forever.
+  pending.forEach(({ reject }) => reject(new Error(message)));
+  pending.clear();
   setBusy(false);
 });
 
@@ -333,15 +334,13 @@ function paintOverlays() {
     : overlayMode === "policy" ? a.priorMap : null;
   if (map) {
     const max = Math.max(...map, 1e-9);
-    const rgb = overlayMode === "search"
-      ? getComputedStyle(document.documentElement).getPropertyValue("--search-heat")
-      : getComputedStyle(document.documentElement).getPropertyValue("--policy-heat");
+    const rgb = overlayMode === "search" ? SEARCH_HEAT : POLICY_HEAT;
     map.forEach((v, idx) => {
       if (v < 5e-4) return;
       const t = Math.sqrt(v / max);
       const heat = document.createElement("span");
       heat.className = "heat";
-      heat.style.background = `rgba(${rgb.trim().replaceAll(" ", ",")},${(0.1 + 0.55 * t).toFixed(3)})`;
+      heat.style.background = `rgba(${rgb},${(0.1 + 0.55 * t).toFixed(3)})`;
       cells[idx].appendChild(heat);
       if (v >= 0.02) {
         const label = document.createElement("span");
@@ -377,19 +376,19 @@ function renderEval() {
   const evaluation = state && state.evaluation;
   const bw = evaluation ? evaluation.blackWinProb : null;
   if (bw === null) {
-    const pending = state && state.evaluationPending;
-    winProbEl.textContent = pending ? "..." : "-";
-    evalLabel.textContent = pending ? "..." : "-";
+    const evalPending = state && state.evaluationPending;
+    winProbEl.textContent = evalPending ? "..." : "-";
+    evalLabel.textContent = evalPending ? "..." : "-";
     evalBlack.style.transform = "scaleY(0.5)";
     winMeterBlack.style.transform = "scaleX(0.5)";
     if (state && state.winner !== null) {
       evalSource.textContent = "对局已结束。";
-    } else if (pending) {
+    } else if (evalPending) {
       evalSource.textContent = "模型实时评估中。";
     } else {
       evalSource.textContent = "模型就绪后自动更新。";
     }
-    statSims.textContent = pending ? "模型" : "-";
+    statSims.textContent = evalPending ? "模型" : "-";
     statTime.textContent = "-";
   } else {
     winProbEl.textContent = pct(bw);
@@ -620,7 +619,6 @@ function renderTreeWithD3(nodes, edges) {
     return;
   }
 
-  const maxDepth = Math.max(...nodes.map((node) => node.depth));
   const width = 920;
   const leafIds = new Set(nodes.map((node) => node.parentId).filter((id) => id !== null));
   const leafCount = Math.max(1, nodes.filter((node) => !leafIds.has(node.id)).length);
@@ -854,6 +852,26 @@ function render(nextState) {
   requestLiveEvaluation();
 }
 
+// Shared busy/try/catch envelope for a worker action that returns a new state.
+// On success `render(next)` already painted, so we only re-render in the error
+// path to avoid a redundant d3 tree relayout.
+async function runAction(label, type, payload = {}, { after } = {}) {
+  let ok = false;
+  try {
+    setBusy(true, label);
+    const nextState = await callWorker(type, payload);
+    resetAnalysisView();
+    if (after) after();
+    render(nextState);
+    ok = true;
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setBusy(false);
+    if (!ok && state) render(state);
+  }
+}
+
 async function switchModel(modelId) {
   if (busy || modelId === selectedModelId) return;
   selectedModelId = modelId;
@@ -863,6 +881,7 @@ async function switchModel(modelId) {
     networkDiagram.textContent = "网络结构图加载中";
     networkDiagram.classList.remove("is-rendered", "diagram-error");
   }
+  let ok = false;
   try {
     setBusy(true, `加载 ${modelDisplayName(modelId)}`);
     loadLine.classList.remove("ready");
@@ -876,121 +895,134 @@ async function switchModel(modelId) {
     setBusy(false);
     await newGame();
     loadLine.classList.add("ready");
+    ok = true;
   } catch (error) {
     showToast(error.message);
   } finally {
     setBusy(false);
-    if (state) render(state);
+    if (!ok && state) render(state);
   }
 }
 
 async function newGame() {
-  try {
-    setBusy(true, "新对局");
-    const nextState = await callWorker("newGame", {
-      human: selectedSide,
-      simulations: selectedSimulations(),
-    });
-    resetAnalysisView();
-    render(nextState);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setBusy(false);
-    if (state) render(state);
-  }
+  await runAction("新对局", "newGame", {
+    human: selectedSide,
+    simulations: selectedSimulations(),
+  });
 }
 
 async function makeMove(row, col) {
   if (busy || !state || state.winner !== null || state.currentPlayer !== state.humanPlayer) return;
   if (state.board[row][col] !== 0) return;
-  try {
-    setBusy(true, "AI 思考中");
-    const nextState = await callWorker("move", {
-      row,
-      col,
-      simulations: selectedSimulations(),
-    });
-    resetAnalysisView();
-    render(nextState);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setBusy(false);
-    if (state) render(state);
-  }
+  await runAction("AI 思考中", "move", {
+    row,
+    col,
+    simulations: selectedSimulations(),
+  });
 }
 
 async function undo() {
   if (busy) return;
-  try {
-    setBusy(true, "悔棋");
-    const nextState = await callWorker("undo");
-    resetAnalysisView();
-    render(nextState);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setBusy(false);
-    if (state) render(state);
-  }
+  await runAction("悔棋", "undo");
 }
 
 async function analyze() {
   if (busy || !state || state.winner !== null) return;
-  try {
-    setBusy(true, "生成提示");
-    const nextState = await callWorker("analyze", { simulations: selectedSimulations() });
-    analysisDetails.open = true;
-    render(nextState);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setBusy(false);
-    if (state) render(state);
-  }
+  await runAction("生成提示", "analyze", { simulations: selectedSimulations() }, {
+    after: () => { analysisDetails.open = true; },
+  });
 }
 
-async function initNetworkDiagram() {
-  if (!networkDiagram || mermaidError) return;
+function networkNode(x, y, w, h, title, subtitle) {
+  const g = svgEl("g", { class: "netnode", transform: `translate(${x} ${y})` });
+  g.appendChild(svgEl("rect", { x: 0, y: 0, width: w, height: h, rx: 8, ry: 8 }));
+  const titleText = svgEl("text", {
+    class: "netnode-title",
+    x: w / 2,
+    y: h / 2 - 6,
+    "text-anchor": "middle",
+  });
+  titleText.textContent = title;
+  const subText = svgEl("text", {
+    class: "netnode-sub",
+    x: w / 2,
+    y: h / 2 + 12,
+    "text-anchor": "middle",
+  });
+  subText.textContent = subtitle;
+  g.append(titleText, subText);
+  return g;
+}
+
+function networkEdge(x1, y1, x2, y2) {
+  return svgEl("line", {
+    class: "netedge",
+    x1,
+    y1,
+    x2,
+    y2,
+    "marker-end": "url(#netArrow)",
+  });
+}
+
+function initNetworkDiagram() {
+  if (!networkDiagram) return;
   const model = state && state.model ? state.model : null;
   const key = model ? `${model.id}:${model.iteration || ""}` : "unknown";
-  if (mermaidReady && renderedNetworkKey === key) return;
-  networkDiagram.textContent = "网络结构图加载中";
-  try {
-    if (!mermaidPromise) {
-      mermaidPromise = import("./assets/vendor/mermaid/mermaid.esm.min.mjs");
-    }
-    const { default: mermaid } = await mermaidPromise;
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: "strict",
-      theme: "base",
-      flowchart: {
-        curve: "basis",
-        htmlLabels: true,
-      },
-      themeVariables: {
-        background: "transparent",
-        primaryColor: "#ffffff",
-        primaryTextColor: "#20231f",
-        primaryBorderColor: "#aab4a6",
-        lineColor: "#596255",
-        secondaryColor: "#f1f3ef",
-        tertiaryColor: "#fbfcfa",
-        fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-      },
-    });
-    const { svg } = await mermaid.render(`networkDiagramSvg-${key.replace(/[^a-z0-9_-]/gi, "-")}`, networkDiagramSource(model));
-    networkDiagram.innerHTML = svg;
-    networkDiagram.classList.add("is-rendered");
-    mermaidReady = true;
-    renderedNetworkKey = key;
-  } catch (error) {
-    networkDiagram.textContent = "网络结构图加载失败。请检查 Mermaid CDN 连接。";
-    networkDiagram.classList.add("diagram-error");
-    mermaidError = true;
-  }
+  if (renderedNetworkKey === key && networkDiagram.classList.contains("is-rendered")) return;
+  const { channels, blocks, policyChannels, valueHidden } = networkDiagramConfig(model);
+
+  const W = 760;
+  const H = 240;
+  const svg = svgEl("svg", {
+    viewBox: `0 0 ${W} ${H}`,
+    class: "network-svg",
+    role: "img",
+    "aria-label": `网络结构：棋盘输入 → 卷积特征 ${channels} 通道 → 残差塔 ${blocks} 块 → 落点倾向 ${policyChannels} 通道与局面评估 hidden ${valueHidden} → MCTS`,
+  });
+
+  const defs = svgEl("defs");
+  const marker = svgEl("marker", {
+    id: "netArrow",
+    viewBox: "0 0 10 10",
+    refX: 9,
+    refY: 5,
+    markerWidth: 7,
+    markerHeight: 7,
+    orient: "auto-start-reverse",
+  });
+  marker.appendChild(svgEl("path", { d: "M0,0 L10,5 L0,10 z", class: "netarrow" }));
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  const boxW = 116;
+  const boxH = 52;
+  const midY = (H - boxH) / 2;
+  const topY = 36;
+  const botY = H - boxH - 36;
+  const colX = [16, 172, 328, 500, 644];
+
+  const inputNode = networkNode(colX[0], midY, boxW, boxH, "棋盘输入", "黑 / 白两层");
+  const stemNode = networkNode(colX[1], midY, boxW, boxH, "卷积特征", `${channels} 通道`);
+  const towerNode = networkNode(colX[2], midY, boxW, boxH, "残差塔", `${blocks} 块`);
+  const policyNode = networkNode(colX[3], topY, boxW, boxH, "落点倾向", `${policyChannels} 通道头`);
+  const valueNode = networkNode(colX[3], botY, boxW, boxH, "局面评估", `hidden ${valueHidden}`);
+  const mctsNode = networkNode(colX[4], midY, boxW, boxH, "MCTS", "反复搜索");
+
+  svg.append(
+    networkEdge(colX[0] + boxW, midY + boxH / 2, colX[1], midY + boxH / 2),
+    networkEdge(colX[1] + boxW, midY + boxH / 2, colX[2], midY + boxH / 2),
+    networkEdge(colX[2] + boxW, midY + boxH / 2 - 8, colX[3], topY + boxH / 2),
+    networkEdge(colX[2] + boxW, midY + boxH / 2 + 8, colX[3], botY + boxH / 2),
+    networkEdge(colX[3] + boxW, topY + boxH / 2, colX[4], midY + boxH / 2 - 8),
+    networkEdge(colX[3] + boxW, botY + boxH / 2, colX[4], midY + boxH / 2 + 8),
+  );
+  svg.append(inputNode, stemNode, towerNode, policyNode, valueNode, mctsNode);
+
+  networkDiagram.replaceChildren(svg);
+  networkDiagram.classList.add("is-rendered");
+  networkDiagram.classList.remove("diagram-error");
+  renderedNetworkKey = key;
 }
 
 function setOverlay(mode) {
@@ -1037,7 +1069,65 @@ networkDetails.addEventListener("toggle", () => {
   if (networkDetails.open) initNetworkDiagram();
 });
 
+function registerServiceWorker() {
+  // Fail-safe: no-op if unsupported or registration rejects. Relative scope so
+  // it works under the GitHub Pages subpath.
+  try {
+    if (!("serviceWorker" in navigator)) return;
+    window.addEventListener("load", () => {
+      navigator.serviceWorker
+        .register("./sw.js", { scope: "./" })
+        .catch(() => undefined);
+    });
+  } catch (error) {
+    /* ignore */
+  }
+}
+
+// Catalog is the source of truth for the model-selector copy. Manifest config
+// drives the per-model numbers; the catalog's `arch`/`iteration` are used only
+// as a fallback so labels still render before a manifest is fetched.
+async function loadCatalogForSelector() {
+  if (modelCatalog) return modelCatalog;
+  try {
+    const response = await fetch(`./assets/models/catalog.json?v=${APP_VERSION}`);
+    if (response.ok) modelCatalog = await response.json();
+  } catch (error) {
+    modelCatalog = null;
+  }
+  return modelCatalog;
+}
+
+function archLabel(arch, iteration) {
+  if (!arch) return "";
+  const { channels, residual_blocks: blocks } = arch;
+  const size = channels && blocks ? `${channels}×${blocks}` : "";
+  const iter = iteration === null || iteration === undefined ? "" : `iter ${iteration}`;
+  return [size, iter].filter(Boolean).join(" · ");
+}
+
+function populateModelLabels(catalog) {
+  if (!catalog || !catalog.models) return;
+  const byId = new Map(catalog.models.map((model) => [model.id, model]));
+  modelInputs.forEach((input) => {
+    const entry = byId.get(input.value);
+    if (!entry) return;
+    const small = input.closest(".model-option")?.querySelector("small");
+    const text = archLabel(entry.arch, entry.iteration);
+    if (small && text) small.textContent = text;
+  });
+}
+
 async function boot() {
+  registerServiceWorker();
+  const catalog = await loadCatalogForSelector();
+  if (catalog) {
+    populateModelLabels(catalog);
+    if (catalog.defaultModel) {
+      selectedModelId = catalog.defaultModel;
+      modelInputs.forEach((input) => { input.checked = input.value === selectedModelId; });
+    }
+  }
   try {
     setBusy(true, "加载模型");
     await callWorker("init", { modelId: selectedModelId });
@@ -1051,6 +1141,19 @@ async function boot() {
     statusPill.textContent = "加载失败";
     statusPill.className = "status-pill done";
     showToast(error.message);
+    // Re-enable controls so the user is not stuck, and offer a one-click retry.
+    setBusy(false);
+    loadLine.classList.remove("ready");
+    loadText.textContent = "加载失败，点这里重试";
+    loadLine.classList.add("retry");
+    loadLine.style.cursor = "pointer";
+    const retry = () => {
+      loadLine.removeEventListener("click", retry);
+      loadLine.classList.remove("retry");
+      loadLine.style.cursor = "";
+      boot();
+    };
+    loadLine.addEventListener("click", retry, { once: true });
   }
 }
 

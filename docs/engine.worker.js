@@ -13,6 +13,72 @@ function sendProgress(label, loaded, total) {
   self.postMessage({ type: "progress", payload: { label, loaded, total } });
 }
 
+function sendInfo(message) {
+  self.postMessage({ type: "info", payload: { message } });
+}
+
+/* Persistent model-bytes cache in IndexedDB, keyed by the manifest sha256 so a
+ * re-export with a new hash auto-invalidates the old entry. */
+const IDB_NAME = "az-gomoku-models";
+const IDB_STORE = "modelBytes";
+let idbPromise = null;
+
+function openModelDb() {
+  if (idbPromise) return idbPromise;
+  idbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      reject(new Error("IndexedDB 不可用"));
+      return;
+    }
+    const request = indexedDB.open(IDB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("无法打开模型缓存"));
+  }).catch((error) => {
+    idbPromise = null;
+    throw error;
+  });
+  return idbPromise;
+}
+
+async function idbGetModel(key) {
+  try {
+    const db = await openModelDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const req = tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (error) {
+    return null;
+  }
+}
+
+async function idbPutModel(key, bytes) {
+  try {
+    const db = await openModelDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).put(bytes, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (error) {
+    /* Caching is best-effort; ignore quota or unavailability errors. */
+  }
+}
+
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
@@ -832,18 +898,28 @@ async function ensureRuntime() {
 async function loadCatalog() {
   if (modelCatalog) return modelCatalog;
   const catalogUrl = new URL("assets/models/catalog.json", self.location.href);
-  const response = await fetch(catalogUrl);
-  if (response.ok) {
+  let response;
+  try {
+    response = await fetch(catalogUrl);
+  } catch (error) {
+    response = null;
+  }
+  if (response && response.ok) {
     const catalog = await response.json();
     modelCatalog = { catalog, baseUrl: catalogUrl };
     return modelCatalog;
   }
-  const manifestUrl = new URL("assets/model/manifest.json", self.location.href);
+  // Fallback mirrors the shipped catalog so the UI selector never silently
+  // serves a different model than the one the user picked. Keyed off the same
+  // assets/models/ base as the real catalog.
   modelCatalog = {
-    baseUrl: manifestUrl,
+    baseUrl: catalogUrl,
     catalog: {
-      defaultModel: "v1",
-      models: [{ id: "v1", label: "v1 / old best", manifest: "manifest.json" }],
+      defaultModel: "v3",
+      models: [
+        { id: "v3", label: "v3 student", manifest: "v3/manifest.json" },
+        { id: "v1", label: "v1 / old best", manifest: "v1/manifest.json" },
+      ],
     },
   };
   return modelCatalog;
@@ -879,42 +955,90 @@ async function loadModel(modelId = null) {
     return;
   }
 
-  const total = manifest.bytes || manifest.chunks.reduce((sum, chunk) => sum + chunk.bytes, 0);
-  const parts = [];
-  let loaded = 0;
-  for (const [index, chunk] of manifest.chunks.entries()) {
-    const url = new URL(chunk.file, manifestUrl);
-    const bytes = await fetchBytes(url, (partLoaded) => {
-      sendProgress(`${meta.label} ${index + 1}/${manifest.chunks.length}`, loaded + partLoaded, total);
+  const modelBytes = await assembleModelBytes(manifest, manifestUrl, meta);
+
+  sendProgress(`初始化 ${meta.label}`, modelBytes.byteLength, modelBytes.byteLength);
+  modelConfig = manifest.config || {};
+  let backend = "wasm";
+  try {
+    session = await ort.InferenceSession.create(modelBytes.buffer, {
+      executionProviders: ["webgpu", "wasm"],
+      graphOptimizationLevel: "all",
     });
-    parts.push(bytes);
-    loaded += bytes.byteLength;
-    sendProgress(`${meta.label} ${index + 1}/${manifest.chunks.length}`, loaded, total);
+    backend = "webgpu";
+  } catch (error) {
+    // Surface the fallback so the UI can warn the user that analysis is slower,
+    // but keep the original error for the console log.
+    console.warn("WebGPU 初始化失败，回退到 CPU (wasm):", error);
+    sendInfo("WebGPU 不可用，已回退到 CPU，分析会更慢");
+    session = await ort.InferenceSession.create(modelBytes.buffer, {
+      executionProviders: ["wasm"],
+      graphOptimizationLevel: "all",
+    });
+    backend = "wasm";
+  }
+  activeModel = { ...meta, backend };
+  sessionCache.set(activeModel.id, { session, modelConfig, activeModel });
+  game = new GameSession(modelConfig, activeModel);
+}
+
+/* Returns the assembled model bytes, preferring a verified IndexedDB hit keyed
+ * on the manifest sha256, otherwise downloading the chunks concurrently,
+ * verifying integrity, and persisting for next time. */
+async function assembleModelBytes(manifest, manifestUrl, meta) {
+  const expectedSha = manifest.sha256 || null;
+
+  if (expectedSha) {
+    const cached = await idbGetModel(expectedSha);
+    if (cached) {
+      const bytes = cached instanceof Uint8Array ? cached : new Uint8Array(cached);
+      sendProgress(`${meta.label} 已缓存`, bytes.byteLength, bytes.byteLength);
+      return bytes;
+    }
   }
 
-  const modelBytes = new Uint8Array(loaded);
+  const chunks = manifest.chunks || [];
+  const total = manifest.bytes || chunks.reduce((sum, chunk) => sum + chunk.bytes, 0);
+  const loadedPerChunk = new Array(chunks.length).fill(0);
+  const reportProgress = () => {
+    const loaded = loadedPerChunk.reduce((sum, value) => sum + value, 0);
+    sendProgress(`${meta.label} ${chunks.length} 分片`, loaded, total);
+  };
+
+  // Fetch concurrently but keep results ordered for reassembly.
+  const parts = await Promise.all(
+    chunks.map(async (chunk, index) => {
+      const url = new URL(chunk.file, manifestUrl);
+      const bytes = await fetchBytes(url, (partLoaded) => {
+        loadedPerChunk[index] = partLoaded;
+        reportProgress();
+      });
+      loadedPerChunk[index] = bytes.byteLength;
+      reportProgress();
+      if (chunk.bytes && bytes.byteLength !== chunk.bytes) {
+        throw new Error("下载损坏，请重试");
+      }
+      return bytes;
+    }),
+  );
+
+  const totalBytes = parts.reduce((sum, part) => sum + part.byteLength, 0);
+  const modelBytes = new Uint8Array(totalBytes);
   let offset = 0;
   for (const part of parts) {
     modelBytes.set(part, offset);
     offset += part.byteLength;
   }
 
-  sendProgress(`初始化 ${meta.label}`, total, total);
-  modelConfig = manifest.config || {};
-  try {
-    session = await ort.InferenceSession.create(modelBytes.buffer, {
-      executionProviders: ["webgpu", "wasm"],
-      graphOptimizationLevel: "all",
-    });
-  } catch (error) {
-    session = await ort.InferenceSession.create(modelBytes.buffer, {
-      executionProviders: ["wasm"],
-      graphOptimizationLevel: "all",
-    });
+  if (expectedSha && crypto && crypto.subtle) {
+    const actualSha = await sha256Hex(modelBytes);
+    if (actualSha !== expectedSha) {
+      throw new Error("下载损坏，请重试");
+    }
   }
-  activeModel = meta;
-  sessionCache.set(activeModel.id, { session, modelConfig, activeModel });
-  game = new GameSession(modelConfig, activeModel);
+
+  if (expectedSha) await idbPutModel(expectedSha, modelBytes);
+  return modelBytes;
 }
 
 self.addEventListener("message", async (event) => {

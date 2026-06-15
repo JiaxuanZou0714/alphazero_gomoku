@@ -1,0 +1,10 @@
+# Core runtime dependencies for training, MCTS and self-play.
+# NOTE: install the torch build that matches your CUDA toolkit from
+# https://pytorch.org/get-started/locally/ — the bare "torch" below resolves to
+# the default (often CPU) wheel.
+numpy
+torch
+
+# Optional, used only by helper scripts:
+matplotlib   # scripts/plot_training_metrics.py
+onnx         # scripts/export_pages_model.py (browser export)

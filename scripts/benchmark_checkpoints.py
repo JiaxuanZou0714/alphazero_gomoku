@@ -13,9 +13,8 @@ if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
 
 from alphazero_gomoku.game import GomokuState
-from alphazero_gomoku.mcts import MCTS, MCTSConfig, visit_count_policy
-from alphazero_gomoku.train import format_duration
-from alphazero_gomoku.utils import load_model, resolve_device
+from alphazero_gomoku.inference import greedy_action, mcts_config_from_cfg, random_opening
+from alphazero_gomoku.utils import format_duration, load_model, resolve_device
 
 
 def parse_simulations(raw: str) -> list[int]:
@@ -23,45 +22,6 @@ def parse_simulations(raw: str) -> list[int]:
     if not values or any(value <= 0 for value in values):
         raise argparse.ArgumentTypeError("simulations must be positive integers")
     return values
-
-
-def config_value(cfg: dict, name: str, default: object) -> object:
-    return cfg.get(name, default)
-
-
-def select_action(model, cfg: dict, state: GomokuState, simulations: int, device: str) -> int:
-    root = MCTS(
-        model,
-        MCTSConfig(
-            simulations=simulations,
-            c_puct=float(config_value(cfg, "mcts_c_puct", 1.5)),
-            dirichlet_alpha=float(config_value(cfg, "mcts_dirichlet_alpha", 0.3)),
-            dirichlet_fraction=float(config_value(cfg, "mcts_dirichlet_fraction", 0.25)),
-            eval_batch_size=min(int(config_value(cfg, "mcts_batch_size", 32)), simulations),
-            amp_dtype=str(config_value(cfg, "mcts_amp_dtype", "bf16")),
-            root_policy_temp=float(config_value(cfg, "mcts_root_policy_temp", 1.0)),
-            shaped_dirichlet=bool(config_value(cfg, "mcts_shaped_dirichlet", False)),
-            dynamic_cpuct=bool(config_value(cfg, "mcts_dynamic_cpuct", False)),
-            fpu_reduction=float(config_value(cfg, "mcts_fpu_reduction", 0.0) or 0.0),
-        ),
-        device=device,
-    ).search(state, add_exploration_noise=False)
-    policy = visit_count_policy(root, state.action_size, temperature=0.0)
-    if policy.sum() <= 0:
-        return int(state.legal_actions()[0])
-    return int(policy.argmax())
-
-
-def random_opening(size: int, win_length: int, opening_moves: int, rng: random.Random) -> list[int]:
-    state = GomokuState.new(size=size, win_length=win_length)
-    opening: list[int] = []
-    for _ in range(opening_moves):
-        if state.is_terminal:
-            break
-        action = int(rng.choice(list(state.legal_actions())))
-        opening.append(action)
-        state = state.apply(action)
-    return opening
 
 
 def play_matchup(
@@ -77,12 +37,12 @@ def play_matchup(
     seed: int,
     device: str,
 ) -> dict[str, object]:
-    size = int(config_value(candidate_cfg, "board_size", config_value(baseline_cfg, "board_size", 10)))
-    win_length = int(
-        config_value(candidate_cfg, "win_length", config_value(baseline_cfg, "win_length", 5))
-    )
+    size = int(candidate_cfg.get("board_size", baseline_cfg.get("board_size", 10)))
+    win_length = int(candidate_cfg.get("win_length", baseline_cfg.get("win_length", 5)))
     rng = random.Random(seed)
     openings = [random_opening(size, win_length, opening_moves, rng) for _ in range((games + 1) // 2)]
+    candidate_mcfg = mcts_config_from_cfg(candidate_cfg, candidate_simulations, for_eval=True)
+    baseline_mcfg = mcts_config_from_cfg(baseline_cfg, baseline_simulations, for_eval=True)
     wins = losses = draws = 0
     started = time.monotonic()
     candidate.eval()
@@ -94,11 +54,9 @@ def play_matchup(
         candidate_player = 1 if game_index % 2 == 0 else -1
         while not state.is_terminal:
             if state.current_player == candidate_player:
-                action = select_action(
-                    candidate, candidate_cfg, state, candidate_simulations, device
-                )
+                action = greedy_action(candidate, candidate_mcfg, state, device)
             else:
-                action = select_action(baseline, baseline_cfg, state, baseline_simulations, device)
+                action = greedy_action(baseline, baseline_mcfg, state, device)
             state = state.apply(action)
         if state.winner == 0:
             draws += 1

@@ -1,0 +1,20 @@
+# Conda environment for the project. The training/CLI commands in the README
+# assume an env named "alphazero-gomoku":
+#
+#     conda env create -f environment.yml
+#     conda activate alphazero-gomoku
+#     pip install -e .            # makes `import alphazero_gomoku` work anywhere
+#
+# GPU users: replace the pip `torch` line with the CUDA build matching your
+# driver from https://pytorch.org/get-started/locally/ (e.g. the cu121 wheel).
+name: alphazero-gomoku
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - numpy
+  - matplotlib
+  - pip
+  - pip:
+      - torch
+      - onnx

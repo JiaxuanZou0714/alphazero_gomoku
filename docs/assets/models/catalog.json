@@ -15,7 +15,7 @@
     {
       "id": "v1",
       "label": "v1 / old best",
-      "manifest": "../model/manifest.json",
+      "manifest": "v1/manifest.json",
       "iteration": 95,
       "bytes": 37777232,
       "arch": {

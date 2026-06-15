@@ -67,12 +67,17 @@ def main() -> None:
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        default=Path("outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt"),
+        default=Path("outputs/checkpoints/v1-old-best/gomoku10_best.pt"),
     )
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=Path("docs/assets/model"),
+        default=None,
+        help=(
+            "Per-model output directory, e.g. docs/assets/models/v3. "
+            "Required so a new export cannot silently overwrite another model "
+            "(such as v1)."
+        ),
     )
     parser.add_argument("--model-id", default=None)
     parser.add_argument("--model-label", default=None)
@@ -87,6 +92,26 @@ def main() -> None:
     args = parser.parse_args()
 
     out_dir = args.out_dir
+    if out_dir is None:
+        if not args.model_id:
+            parser.error(
+                "--out-dir is required (e.g. docs/assets/models/v3), "
+                "or pass --model-id to derive docs/assets/models/<model-id>."
+            )
+        out_dir = Path("docs/assets/models") / args.model_id
+    # Guard against silently overwriting a different model's chunks.
+    existing_manifest = out_dir / "manifest.json"
+    if existing_manifest.exists() and args.model_id:
+        try:
+            prior = json.loads(existing_manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            prior = {}
+        prior_id = prior.get("id")
+        if prior_id and prior_id != args.model_id:
+            parser.error(
+                f"refusing to overwrite existing model '{prior_id}' in {out_dir} "
+                f"with model-id '{args.model_id}'. Choose a dedicated --out-dir."
+            )
     out_dir.mkdir(parents=True, exist_ok=True)
     onnx_path = out_dir / "gomoku10_best.onnx"
 

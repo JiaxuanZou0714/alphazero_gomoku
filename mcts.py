@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import random
-from contextlib import nullcontext
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -10,7 +9,7 @@ import torch
 
 from .game import GomokuState
 from .model import PolicyValueNet
-from .torch_compat import tensor_from_array
+from .torch_compat import autocast_for, tensor_from_array
 
 
 @dataclass
@@ -73,9 +72,13 @@ class MCTS:
         # reproducible (tie-breaks and Dirichlet noise included).
         self.rng = rng or random.Random(random.getrandbits(64))
         self.np_rng = np.random.default_rng(self.rng.getrandbits(64))
+        # Insertion-ordered cache with a FIFO cap: a single long prod game with
+        # tree reuse can otherwise accumulate one (board+policy) entry per node
+        # ever expanded, growing unbounded across ~40 moves x hundreds of sims.
         self.eval_cache: dict[
             tuple[int, int, tuple[int, ...], bytes, float], tuple[np.ndarray, float]
         ] = {}
+        self.eval_cache_max = 100_000
 
     @staticmethod
     def _eval_cache_key(
@@ -293,18 +296,14 @@ class MCTS:
         for index, key, probs, value in zip(missing_indices, missing_keys, probs_batch, values):
             result = (probs.astype(np.float32), float(value))
             self.eval_cache[key] = result
+            if len(self.eval_cache) > self.eval_cache_max:
+                self.eval_cache.pop(next(iter(self.eval_cache)))
             results[index] = result
 
         return [result for result in results if result is not None]
 
     def _autocast_context(self) -> object:
-        if self.device.type != "cuda" or self.config.amp_dtype == "none":
-            return nullcontext()
-        if self.config.amp_dtype == "bf16":
-            return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-        if self.config.amp_dtype == "fp16":
-            return torch.autocast(device_type="cuda", dtype=torch.float16)
-        raise ValueError(f"unknown amp_dtype: {self.config.amp_dtype}")
+        return autocast_for(self.device, self.config.amp_dtype)
 
     @staticmethod
     def _add_virtual_visits(search_path: list[Node]) -> None:

@@ -229,6 +229,11 @@ h1 {
   display: none;
 }
 
+.load-line.retry {
+  border-color: rgba(182, 83, 60, 0.42);
+  color: var(--accent);
+}
+
 .activity-mark,
 .compute-mark {
   position: relative;
@@ -263,11 +268,6 @@ h1 {
 .compute-mark::before {
   border-color: rgba(47, 116, 110, 0.18);
   border-top-color: var(--accent-2);
-}
-
-.activity-mark span,
-.compute-mark span {
-  display: none;
 }
 
 .load-copy {
@@ -314,10 +314,6 @@ h1 {
   transform: scaleX(0);
   transform-origin: left center;
   transition: transform 180ms var(--ease-out);
-}
-
-.load-bar span::after {
-  display: none;
 }
 
 .board-area {
@@ -1151,6 +1147,35 @@ tr.empty-row td {
   margin: 0 auto;
 }
 
+.netnode rect {
+  fill: #ffffff;
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.netnode-title {
+  fill: var(--ink);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.netnode-sub {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+}
+
+.netedge {
+  stroke: var(--line-strong);
+  stroke-width: 1.6;
+  fill: none;
+}
+
+.netarrow {
+  fill: var(--line-strong);
+}
+
 .diagram-error {
   display: grid;
   place-items: center;
@@ -1356,12 +1381,6 @@ tr.empty-row td {
   fill: var(--accent);
 }
 
-@keyframes treeFlow {
-  to {
-    stroke-dashoffset: -26;
-  }
-}
-
 @keyframes statusBeat {
   0%,
   100% {
@@ -1387,25 +1406,6 @@ tr.empty-row td {
 @keyframes computeSpin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@keyframes computeBlink {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.85);
-  }
-
-  45% {
-    opacity: 1;
-    transform: scale(1.12);
-  }
-}
-
-@keyframes loadSweep {
-  to {
-    transform: translateX(100%);
   }
 }
 
@@ -1435,9 +1435,6 @@ tr.empty-row td {
   .tree-edge.best,
   .activity-mark::before,
   .compute-mark::before,
-  .activity-mark span,
-  .compute-mark span,
-  .load-bar span::after,
   .status-pill.loading::before,
   .status-pill.thinking::before {
     animation: none;

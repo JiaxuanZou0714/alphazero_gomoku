@@ -8,10 +8,8 @@ import math
 import multiprocessing as mp
 import random
 import shutil
-import sys
 import time
 from collections import deque
-from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -21,9 +19,17 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
 from .game import GomokuState
+from .inference import random_opening as _random_opening_plies
 from .mcts import MCTS, MCTSConfig, visit_count_policy
 from .model import PolicyValueNet, build_model_from_config, model_kwargs_from_config
-from .torch_compat import tensor_from_array
+from .torch_compat import autocast_for, tensor_from_array
+from .utils import (
+    cpu_state_dict,
+    format_duration,
+    load_torch,
+    resolve_device,
+    unwrap_model,
+)
 
 # (encoded_state, mcts_policy, value, policy_weight). policy_weight is 0 for
 # positions from cheap searches (playout cap randomization): they only train
@@ -157,32 +163,6 @@ def limit_worker_threads() -> None:
         pass
 
 
-def resolve_device(device: str) -> str:
-    if device == "auto":
-        return "cuda" if torch.cuda.is_available() else "cpu"
-    if device.startswith("cuda") and not torch.cuda.is_available():
-        raise RuntimeError("CUDA was requested, but this Python environment cannot see it")
-    return device
-
-
-def format_duration(seconds: float) -> str:
-    seconds = max(0, int(seconds))
-    hours, seconds = divmod(seconds, 3600)
-    minutes, seconds = divmod(seconds, 60)
-    if hours:
-        return f"{hours}h {minutes:02d}m {seconds:02d}s"
-    if minutes:
-        return f"{minutes}m {seconds:02d}s"
-    return f"{seconds}s"
-
-
-def load_torch(path: Path | str, *, map_location: str | torch.device = "cpu") -> object:
-    try:
-        return torch.load(path, map_location=map_location, weights_only=False)
-    except TypeError:
-        return torch.load(path, map_location=map_location)
-
-
 def make_grad_scaler(enabled: bool, amp_dtype: str) -> object | None:
     if not enabled or amp_dtype != "fp16":
         return None
@@ -190,16 +170,6 @@ def make_grad_scaler(enabled: bool, amp_dtype: str) -> object | None:
         return torch.amp.GradScaler("cuda", enabled=True)
     except (AttributeError, TypeError):
         return torch.cuda.amp.GradScaler(enabled=True)
-
-
-def autocast_context(device: str, enabled: bool, amp_dtype: str) -> object:
-    if not enabled or not device.startswith("cuda") or amp_dtype == "none":
-        return nullcontext()
-    if amp_dtype == "bf16":
-        return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-    if amp_dtype == "fp16":
-        return torch.autocast(device_type="cuda", dtype=torch.float16)
-    raise ValueError(f"unknown amp_dtype: {amp_dtype}")
 
 
 def scheduled_learning_rate(cfg: TrainConfig, iteration: int, end_iteration: int) -> float:
@@ -230,336 +200,333 @@ def append_metrics(path: str, row: dict[str, object]) -> None:
         handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
-def preset_config(name: str) -> TrainConfig:
-    cfg = TrainConfig(preset=name)
-    if name == "local":
-        cfg.augment_symmetries = True
-        return cfg
-    if name == "v2":
-        cfg.iterations = 60
-        cfg.games_per_iteration = 128
-        cfg.simulations = 512
-        cfg.mcts_batch_size = 64
-        cfg.epochs = 3
-        cfg.train_steps_per_iteration = 128
-        cfg.batch_size = 2048
-        cfg.replay_size = 120_000
-        cfg.learning_rate = 8.0e-5
-        cfg.min_learning_rate = 8.0e-6
-        cfg.lr_schedule = "cosine"
-        cfg.warmup_iterations = 2
-        cfg.weight_decay = 1.0e-4
-        cfg.max_grad_norm = 10.0
-        cfg.temperature_moves = 12
-        cfg.mcts_c_puct = 1.25
-        cfg.mcts_dirichlet_alpha = 0.15
-        cfg.channels = 192
-        cfg.residual_blocks = 12
-        cfg.policy_channels = 16
-        cfg.value_channels = 8
-        cfg.value_hidden = 512
-        cfg.use_se = False
-        cfg.use_global_pool = True
-        cfg.use_soft_policy = True
-        cfg.soft_policy_loss_weight = 4.0
-        cfg.value_loss_weight = 1.5
-        cfg.surprise_weighting = True
-        cfg.mcts_value_weight = 0.5
-        cfg.mcts_root_policy_temp = 1.1
-        cfg.mcts_shaped_dirichlet = True
-        cfg.mcts_dynamic_cpuct = True
-        cfg.mcts_fpu_reduction = 0.2
-        cfg.mcts_forced_playouts = True
-        cfg.playout_cap_randomization = True
-        cfg.full_search_prob = 0.33
-        cfg.fast_simulations = 128
-        cfg.checkpoint_dir = "alphazero_gomoku/outputs/checkpoints/v2"
-        cfg.replay_path = "alphazero_gomoku/outputs/replay/v2_replay.pt"
-        cfg.replay_save_interval = 2
-        cfg.metrics_path = "alphazero_gomoku/outputs/metrics/v2.jsonl"
-        cfg.resume = "alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt"
-        cfg.self_play_workers = 32
-        cfg.self_play_devices = "auto"
-        cfg.data_parallel = False
-        cfg.eval_interval = 5
-        cfg.eval_games = 32
-        cfg.eval_simulations = 512
-        cfg.eval_opening_moves = 4
-        cfg.eval_progress_interval = 1
-        cfg.eval_workers = 8
-        cfg.train_data_workers = 2
-        cfg.eval_early_cutoff = True
-        cfg.promotion_threshold = 0.55
-        cfg.early_stop_evals = 4
-        return cfg
-    if name == "v3-local":
-        cfg.iterations = 40
-        cfg.games_per_iteration = 48
-        cfg.simulations = 256
-        cfg.mcts_batch_size = 32
-        cfg.epochs = 3
-        cfg.train_steps_per_iteration = 64
-        cfg.batch_size = 1024
-        cfg.replay_size = 50_000
-        cfg.min_replay_size = 20_000
-        cfg.max_train_replay_passes = 2.0
-        cfg.learning_rate = 4.0e-5
-        cfg.min_learning_rate = 8.0e-6
-        cfg.lr_schedule = "cosine"
-        cfg.warmup_iterations = 2
-        cfg.weight_decay = 1.0e-4
-        cfg.max_grad_norm = 10.0
-        cfg.temperature_moves = 12
-        cfg.mcts_c_puct = 1.25
-        cfg.mcts_dirichlet_alpha = 0.15
-        cfg.channels = 192
-        cfg.residual_blocks = 12
-        cfg.policy_channels = 16
-        cfg.value_channels = 8
-        cfg.value_hidden = 512
-        cfg.use_global_pool = True
-        cfg.use_soft_policy = True
-        cfg.soft_policy_loss_weight = 4.0
-        cfg.value_loss_weight = 1.5
-        cfg.surprise_weighting = True
-        cfg.mcts_value_weight = 0.5
-        cfg.mcts_root_policy_temp = 1.1
-        cfg.mcts_shaped_dirichlet = True
-        cfg.mcts_dynamic_cpuct = True
-        cfg.mcts_fpu_reduction = 0.2
-        cfg.mcts_forced_playouts = True
-        cfg.playout_cap_randomization = True
-        cfg.full_search_prob = 0.50
-        cfg.fast_simulations = 64
-        cfg.checkpoint_dir = "alphazero_gomoku/outputs/checkpoints/v3-local"
-        cfg.replay_path = "alphazero_gomoku/outputs/replay/v3-local_replay.pt"
-        cfg.replay_save_interval = 2
-        cfg.metrics_path = "alphazero_gomoku/outputs/metrics/v3-local.jsonl"
-        cfg.resume = "alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt"
-        cfg.self_play_workers = 4
-        cfg.self_play_devices = "auto"
-        cfg.data_parallel = False
-        cfg.eval_interval = 5
-        cfg.eval_games = 16
-        cfg.eval_simulations = 256
-        cfg.eval_opening_moves = 4
-        cfg.eval_progress_interval = 1
-        cfg.eval_workers = 4
-        cfg.eval_early_cutoff = True
-        cfg.promotion_threshold = 0.55
-        cfg.gate_evaluation = True
-        cfg.early_stop_evals = 3
-        return cfg
-    if name == "v3-student-local":
-        cfg.iterations = 80
-        cfg.games_per_iteration = 96
-        cfg.simulations = 256
-        cfg.mcts_batch_size = 32
-        cfg.epochs = 2
-        cfg.train_steps_per_iteration = 96
-        cfg.batch_size = 2048
-        cfg.replay_size = 80_000
-        cfg.min_replay_size = 25_000
-        cfg.max_train_replay_passes = 2.0
-        cfg.learning_rate = 6.0e-5
-        cfg.min_learning_rate = 8.0e-6
-        cfg.lr_schedule = "cosine"
-        cfg.warmup_iterations = 3
-        cfg.weight_decay = 1.0e-4
-        cfg.max_grad_norm = 10.0
-        cfg.temperature_moves = 12
-        cfg.mcts_c_puct = 1.25
-        cfg.mcts_dirichlet_alpha = 0.15
-        cfg.channels = 128
-        cfg.residual_blocks = 8
-        cfg.policy_channels = 12
-        cfg.value_channels = 6
-        cfg.value_hidden = 384
-        cfg.use_global_pool = True
-        cfg.use_soft_policy = True
-        cfg.soft_policy_loss_weight = 2.0
-        cfg.value_loss_weight = 1.25
-        cfg.surprise_weighting = False
-        cfg.mcts_value_weight = 0.25
-        cfg.mcts_root_policy_temp = 1.1
-        cfg.mcts_shaped_dirichlet = True
-        cfg.mcts_dynamic_cpuct = True
-        cfg.mcts_fpu_reduction = 0.2
-        cfg.mcts_forced_playouts = True
-        cfg.playout_cap_randomization = True
-        cfg.full_search_prob = 0.35
-        cfg.fast_simulations = 64
-        cfg.checkpoint_dir = "alphazero_gomoku/outputs/checkpoints/v3-student-local"
-        cfg.replay_path = "alphazero_gomoku/outputs/replay/v3-student-local_replay.pt"
-        cfg.replay_save_interval = 2
-        cfg.metrics_path = "alphazero_gomoku/outputs/metrics/v3-student-local.jsonl"
-        cfg.resume = "alphazero_gomoku/outputs/checkpoints/distill-oldbest-128x8/gomoku10_student_best.pt"
-        cfg.self_play_workers = 1
-        cfg.self_play_devices = "auto"
-        cfg.eval_interval = 5
-        cfg.eval_games = 20
-        cfg.eval_simulations = 256
-        cfg.eval_opening_moves = 4
-        cfg.eval_progress_interval = 1
-        cfg.eval_workers = 8
-        cfg.train_data_workers = 2
-        cfg.eval_early_cutoff = True
-        cfg.promotion_threshold = 0.55
-        cfg.gate_evaluation = True
-        cfg.early_stop_evals = 3
-        return cfg
-    if name == "a100-4":
-        cfg.iterations = 100
-        cfg.games_per_iteration = 96
-        cfg.simulations = 384
-        cfg.mcts_batch_size = 48
-        cfg.epochs = 3
-        cfg.train_steps_per_iteration = 96
-        cfg.batch_size = 4096
+# KataGo-style search/architecture flags shared verbatim by every "smart"
+# preset (v2, v3-local, v3-student-local, a100-4). Kept in one place so a tuning
+# change reaches all of them at once instead of being hand-copied per preset.
+_KATAGO_DEFAULTS: dict[str, object] = {
+    "use_global_pool": True,        # global context injection (additive pooling bias)
+    "use_soft_policy": True,        # auxiliary soft policy head
+    "mcts_root_policy_temp": 1.1,   # flatten root priors slightly
+    "mcts_shaped_dirichlet": True,  # shaped Dirichlet by prior rank
+    "mcts_dynamic_cpuct": True,     # variance-scaled exploration
+    "mcts_fpu_reduction": 0.2,      # first-play urgency reduction
+    "mcts_forced_playouts": True,   # forced playouts + policy target pruning
+    "playout_cap_randomization": True,  # cheap value-only searches most moves
+}
+
+# Each preset is a flat dict of overrides applied over a default ``TrainConfig``.
+# Only fields that differ from the dataclass defaults are listed; ``**_KATAGO``
+# spreads the shared block above. Keeping these as data (not procedural setattr
+# blocks) makes the deltas between presets visible and removes ~250 lines of
+# copy-paste that previously drifted apart.
+PRESETS: dict[str, dict[str, object]] = {
+    "local": {"augment_symmetries": True},
+    "v2": {
+        "iterations": 60,
+        "games_per_iteration": 128,
+        "simulations": 512,
+        "mcts_batch_size": 64,
+        "epochs": 3,
+        "train_steps_per_iteration": 128,
+        "batch_size": 2048,
+        "replay_size": 120_000,
+        "learning_rate": 8.0e-5,
+        "min_learning_rate": 8.0e-6,
+        "lr_schedule": "cosine",
+        "warmup_iterations": 2,
+        "weight_decay": 1.0e-4,
+        "max_grad_norm": 10.0,
+        "temperature_moves": 12,
+        "mcts_c_puct": 1.25,
+        "mcts_dirichlet_alpha": 0.15,
+        "channels": 192,
+        "residual_blocks": 12,
+        "policy_channels": 16,
+        "value_channels": 8,
+        "value_hidden": 512,
+        "use_se": False,
+        "soft_policy_loss_weight": 4.0,
+        "value_loss_weight": 1.5,
+        "surprise_weighting": True,
+        "mcts_value_weight": 0.5,
+        "full_search_prob": 0.33,
+        "fast_simulations": 128,
+        "checkpoint_dir": "alphazero_gomoku/outputs/checkpoints/v2",
+        "replay_path": "alphazero_gomoku/outputs/replay/v2_replay.pt",
+        "replay_save_interval": 2,
+        "metrics_path": "alphazero_gomoku/outputs/metrics/v2.jsonl",
+        "resume": "alphazero_gomoku/outputs/checkpoints/v1-old-best/gomoku10_best.pt",
+        "self_play_workers": 32,
+        "self_play_devices": "auto",
+        "data_parallel": False,
+        "eval_interval": 5,
+        "eval_games": 32,
+        "eval_simulations": 512,
+        "eval_opening_moves": 4,
+        "eval_progress_interval": 1,
+        "eval_workers": 8,
+        "train_data_workers": 2,
+        "eval_early_cutoff": True,
+        "promotion_threshold": 0.55,
+        "early_stop_evals": 4,
+        **_KATAGO_DEFAULTS,
+    },
+    "v3-local": {
+        "iterations": 40,
+        "games_per_iteration": 48,
+        "simulations": 256,
+        "mcts_batch_size": 32,
+        "epochs": 3,
+        "train_steps_per_iteration": 64,
+        "batch_size": 1024,
+        "replay_size": 50_000,
+        "min_replay_size": 20_000,
+        "max_train_replay_passes": 2.0,
+        "learning_rate": 4.0e-5,
+        "min_learning_rate": 8.0e-6,
+        "lr_schedule": "cosine",
+        "warmup_iterations": 2,
+        "weight_decay": 1.0e-4,
+        "max_grad_norm": 10.0,
+        "temperature_moves": 12,
+        "mcts_c_puct": 1.25,
+        "mcts_dirichlet_alpha": 0.15,
+        "channels": 192,
+        "residual_blocks": 12,
+        "policy_channels": 16,
+        "value_channels": 8,
+        "value_hidden": 512,
+        "soft_policy_loss_weight": 4.0,
+        "value_loss_weight": 1.5,
+        "surprise_weighting": True,
+        "mcts_value_weight": 0.5,
+        "full_search_prob": 0.50,
+        "fast_simulations": 64,
+        "checkpoint_dir": "alphazero_gomoku/outputs/checkpoints/v3-local",
+        "replay_path": "alphazero_gomoku/outputs/replay/v3-local_replay.pt",
+        "replay_save_interval": 2,
+        "metrics_path": "alphazero_gomoku/outputs/metrics/v3-local.jsonl",
+        "resume": "alphazero_gomoku/outputs/checkpoints/v1-old-best/gomoku10_best.pt",
+        "self_play_workers": 4,
+        "self_play_devices": "auto",
+        "data_parallel": False,
+        "eval_interval": 5,
+        "eval_games": 16,
+        "eval_simulations": 256,
+        "eval_opening_moves": 4,
+        "eval_progress_interval": 1,
+        "eval_workers": 4,
+        "eval_early_cutoff": True,
+        "promotion_threshold": 0.55,
+        "gate_evaluation": True,
+        "early_stop_evals": 3,
+        **_KATAGO_DEFAULTS,
+    },
+    "v3-student-local": {
+        "iterations": 80,
+        "games_per_iteration": 96,
+        "simulations": 256,
+        "mcts_batch_size": 32,
+        "epochs": 2,
+        "train_steps_per_iteration": 96,
+        "batch_size": 2048,
+        "replay_size": 80_000,
+        "min_replay_size": 25_000,
+        "max_train_replay_passes": 2.0,
+        "learning_rate": 6.0e-5,
+        "min_learning_rate": 8.0e-6,
+        "lr_schedule": "cosine",
+        "warmup_iterations": 3,
+        "weight_decay": 1.0e-4,
+        "max_grad_norm": 10.0,
+        "temperature_moves": 12,
+        "mcts_c_puct": 1.25,
+        "mcts_dirichlet_alpha": 0.15,
+        "channels": 128,
+        "residual_blocks": 8,
+        "policy_channels": 12,
+        "value_channels": 6,
+        "value_hidden": 384,
+        "soft_policy_loss_weight": 2.0,
+        "value_loss_weight": 1.25,
+        "surprise_weighting": False,
+        "mcts_value_weight": 0.25,
+        "full_search_prob": 0.35,
+        "fast_simulations": 64,
+        "checkpoint_dir": "alphazero_gomoku/outputs/checkpoints/v3-student-local",
+        "replay_path": "alphazero_gomoku/outputs/replay/v3-student-local_replay.pt",
+        "replay_save_interval": 2,
+        "metrics_path": "alphazero_gomoku/outputs/metrics/v3-student-local.jsonl",
+        "resume": "alphazero_gomoku/outputs/checkpoints/distill-oldbest-128x8/gomoku10_student_best.pt",
+        "self_play_workers": 1,
+        "self_play_devices": "auto",
+        "eval_interval": 5,
+        "eval_games": 20,
+        "eval_simulations": 256,
+        "eval_opening_moves": 4,
+        "eval_progress_interval": 1,
+        "eval_workers": 8,
+        "train_data_workers": 2,
+        "eval_early_cutoff": True,
+        "promotion_threshold": 0.55,
+        "gate_evaluation": True,
+        "early_stop_evals": 3,
+        **_KATAGO_DEFAULTS,
+    },
+    "a100-4": {
+        "iterations": 100,
+        "games_per_iteration": 96,
+        "simulations": 384,
+        "mcts_batch_size": 48,
+        "epochs": 3,
+        "train_steps_per_iteration": 96,
+        "batch_size": 4096,
         # Raw positions only (symmetry augmentation happens at train time), so
         # 80k ≈ a ~50-iteration window. The old 500k was sized for 8x-augmented
         # entries; keeping it would mean never evicting stale early-run data,
         # whose bootstrapped value labels (mcts_value_weight) decay into noise.
-        cfg.replay_size = 80_000
-        cfg.learning_rate = 2.0e-4
-        cfg.min_learning_rate = 2.0e-5
-        cfg.lr_schedule = "cosine"
-        cfg.warmup_iterations = 5
-        cfg.weight_decay = 1.0e-4
+        "replay_size": 80_000,
+        "learning_rate": 2.0e-4,
+        "min_learning_rate": 2.0e-5,
+        "lr_schedule": "cosine",
+        "warmup_iterations": 5,
+        "weight_decay": 1.0e-4,
         # The 8x soft policy term keeps healthy grad norms around 10; clipping
         # at 5 would permanently halve the effective LR instead of catching spikes.
-        cfg.max_grad_norm = 10.0
-        cfg.temperature_moves = 12
-        cfg.mcts_c_puct = 1.25
-        cfg.mcts_dirichlet_alpha = 0.15
-        cfg.channels = 192
-        cfg.residual_blocks = 12
-        cfg.policy_channels = 16
-        cfg.value_channels = 8
-        cfg.value_hidden = 512
-        cfg.use_se = False                  # global pooling replaces SE (both are channel-wise context)
-        cfg.use_global_pool = True          # KataGo: global context injection (additive pooling bias)
-        cfg.use_soft_policy = True          # KataGo: auxiliary soft policy head
-        cfg.soft_policy_loss_weight = 8.0   # KataGo: 8x weight on soft policy loss
-        cfg.surprise_weighting = True       # KataGo: prioritise high-KL replay samples
-        cfg.mcts_value_weight = 0.5         # KataGo: mix MCTS value into value target
-        cfg.mcts_root_policy_temp = 1.1     # KataGo: flatten root priors slightly
-        cfg.mcts_shaped_dirichlet = True    # KataGo: shaped Dirichlet by prior rank
-        cfg.mcts_dynamic_cpuct = True       # KataGo: variance-scaled exploration
-        cfg.mcts_fpu_reduction = 0.2        # KataGo: first-play urgency reduction
-        cfg.mcts_forced_playouts = True     # KataGo: forced playouts + policy target pruning
-        cfg.playout_cap_randomization = True  # KataGo: cheap value-only searches most moves
-        cfg.full_search_prob = 0.25
-        cfg.fast_simulations = 96
-        cfg.checkpoint_dir = "alphazero_gomoku/outputs/checkpoints/a100-4"
-        cfg.replay_path = "alphazero_gomoku/outputs/replay/a100-4_replay.pt"
-        cfg.metrics_path = "alphazero_gomoku/outputs/metrics/a100-4.jsonl"
-        cfg.self_play_workers = 16
-        cfg.self_play_devices = "auto"
-        cfg.data_parallel = False
-        cfg.eval_interval = 5
-        cfg.eval_games = 16
-        cfg.eval_simulations = 128
-        cfg.eval_workers = 8
-        cfg.train_data_workers = 2
-        cfg.promotion_threshold = 0.55
-        cfg.early_stop_evals = 3            # stop after 3 failed evals (15 stagnant iterations)
-        return cfg
-    if name == "a100-prod":
-        cfg.iterations = 300
-        cfg.games_per_iteration = 256
-        cfg.simulations = 384
-        cfg.mcts_batch_size = 64
-        cfg.epochs = 2
-        cfg.train_steps_per_iteration = 192
-        cfg.batch_size = 8192
-        cfg.replay_size = 1_500_000
-        cfg.learning_rate = 1.5e-4
-        cfg.min_learning_rate = 1.5e-5
-        cfg.lr_schedule = "cosine"
-        cfg.warmup_iterations = 10
-        cfg.weight_decay = 1.0e-4
-        cfg.temperature_moves = 12
-        cfg.mcts_c_puct = 1.25
-        cfg.mcts_dirichlet_alpha = 0.15
-        cfg.channels = 256
-        cfg.residual_blocks = 16
-        cfg.policy_channels = 32
-        cfg.value_channels = 16
-        cfg.value_hidden = 768
-        cfg.use_se = True
-        cfg.checkpoint_dir = "alphazero_gomoku/outputs/checkpoints/a100-prod"
-        cfg.replay_path = "alphazero_gomoku/outputs/replay/a100-prod_replay.pt"
-        cfg.metrics_path = "alphazero_gomoku/outputs/metrics/a100-prod.jsonl"
-        cfg.self_play_workers = 16
-        cfg.self_play_devices = "auto"
-        cfg.data_parallel = False
-        cfg.eval_interval = 5
-        cfg.eval_games = 32
-        cfg.eval_simulations = 192
-        cfg.eval_workers = 16
-        cfg.train_data_workers = 2
-        cfg.promotion_threshold = 0.55
-        return cfg
-    if name == "a100-fast":
-        cfg.iterations = 40
-        cfg.games_per_iteration = 128
-        cfg.simulations = 96
-        cfg.mcts_batch_size = 24
-        cfg.epochs = 2
-        cfg.train_steps_per_iteration = 64
-        cfg.batch_size = 4096
-        cfg.replay_size = 300_000
-        cfg.learning_rate = 2.5e-4
-        cfg.min_learning_rate = 2.5e-5
-        cfg.lr_schedule = "cosine"
-        cfg.warmup_iterations = 3
-        cfg.temperature_moves = 12
-        cfg.mcts_c_puct = 1.25
-        cfg.mcts_dirichlet_alpha = 0.15
-        cfg.channels = 96
-        cfg.residual_blocks = 6
-        cfg.policy_channels = 8
-        cfg.value_channels = 4
-        cfg.value_hidden = 256
-        cfg.checkpoint_dir = "alphazero_gomoku/outputs/checkpoints/a100-fast"
-        cfg.replay_path = "alphazero_gomoku/outputs/replay/a100-fast_replay.pt"
-        cfg.metrics_path = "alphazero_gomoku/outputs/metrics/a100-fast.jsonl"
-        cfg.self_play_workers = 16
-        cfg.self_play_devices = "auto"
-        cfg.data_parallel = False
-        cfg.train_data_workers = 2
-        return cfg
-    if name == "a100-turbo":
-        cfg.iterations = 12
-        cfg.games_per_iteration = 128
-        cfg.simulations = 32
-        cfg.mcts_batch_size = 16
-        cfg.epochs = 2
-        cfg.train_steps_per_iteration = 16
-        cfg.batch_size = 8192
-        cfg.replay_size = 150_000
-        cfg.learning_rate = 3.0e-4
-        cfg.min_learning_rate = 3.0e-5
-        cfg.lr_schedule = "cosine"
-        cfg.warmup_iterations = 2
-        cfg.temperature_moves = 10
-        cfg.mcts_c_puct = 1.25
-        cfg.mcts_dirichlet_alpha = 0.15
-        cfg.channels = 64
-        cfg.residual_blocks = 4
-        cfg.policy_channels = 4
-        cfg.value_channels = 2
-        cfg.value_hidden = 192
-        cfg.checkpoint_dir = "alphazero_gomoku/outputs/checkpoints/a100-turbo"
-        cfg.replay_path = "alphazero_gomoku/outputs/replay/a100-turbo_replay.pt"
-        cfg.metrics_path = "alphazero_gomoku/outputs/metrics/a100-turbo.jsonl"
-        cfg.self_play_workers = 16
-        cfg.self_play_devices = "auto"
-        cfg.data_parallel = False
-        cfg.train_data_workers = 2
-        return cfg
-    raise ValueError(f"unknown preset: {name}")
+        "max_grad_norm": 10.0,
+        "temperature_moves": 12,
+        "mcts_c_puct": 1.25,
+        "mcts_dirichlet_alpha": 0.15,
+        "channels": 192,
+        "residual_blocks": 12,
+        "policy_channels": 16,
+        "value_channels": 8,
+        "value_hidden": 512,
+        "use_se": False,                 # global pooling replaces SE (both channel-wise context)
+        "soft_policy_loss_weight": 8.0,  # KataGo: 8x weight on soft policy loss
+        "surprise_weighting": True,      # KataGo: prioritise high-KL replay samples
+        "mcts_value_weight": 0.5,        # KataGo: mix MCTS value into value target
+        "full_search_prob": 0.25,
+        "fast_simulations": 96,
+        "checkpoint_dir": "alphazero_gomoku/outputs/checkpoints/a100-4",
+        "replay_path": "alphazero_gomoku/outputs/replay/a100-4_replay.pt",
+        "metrics_path": "alphazero_gomoku/outputs/metrics/a100-4.jsonl",
+        "self_play_workers": 16,
+        "self_play_devices": "auto",
+        "data_parallel": False,
+        "eval_interval": 5,
+        "eval_games": 16,
+        "eval_simulations": 128,
+        "eval_workers": 8,
+        "train_data_workers": 2,
+        "promotion_threshold": 0.55,
+        "early_stop_evals": 3,           # stop after 3 failed evals (15 stagnant iterations)
+        **_KATAGO_DEFAULTS,
+    },
+    "a100-prod": {
+        "iterations": 300,
+        "games_per_iteration": 256,
+        "simulations": 384,
+        "mcts_batch_size": 64,
+        "epochs": 2,
+        "train_steps_per_iteration": 192,
+        "batch_size": 8192,
+        "replay_size": 1_500_000,
+        "learning_rate": 1.5e-4,
+        "min_learning_rate": 1.5e-5,
+        "lr_schedule": "cosine",
+        "warmup_iterations": 10,
+        "weight_decay": 1.0e-4,
+        "temperature_moves": 12,
+        "mcts_c_puct": 1.25,
+        "mcts_dirichlet_alpha": 0.15,
+        "channels": 256,
+        "residual_blocks": 16,
+        "policy_channels": 32,
+        "value_channels": 16,
+        "value_hidden": 768,
+        "use_se": True,
+        "checkpoint_dir": "alphazero_gomoku/outputs/checkpoints/a100-prod",
+        "replay_path": "alphazero_gomoku/outputs/replay/a100-prod_replay.pt",
+        "metrics_path": "alphazero_gomoku/outputs/metrics/a100-prod.jsonl",
+        "self_play_workers": 16,
+        "self_play_devices": "auto",
+        "data_parallel": False,
+        "eval_interval": 5,
+        "eval_games": 32,
+        "eval_simulations": 192,
+        "eval_workers": 16,
+        "train_data_workers": 2,
+        "promotion_threshold": 0.55,
+    },
+    "a100-fast": {
+        "iterations": 40,
+        "games_per_iteration": 128,
+        "simulations": 96,
+        "mcts_batch_size": 24,
+        "epochs": 2,
+        "train_steps_per_iteration": 64,
+        "batch_size": 4096,
+        "replay_size": 300_000,
+        "learning_rate": 2.5e-4,
+        "min_learning_rate": 2.5e-5,
+        "lr_schedule": "cosine",
+        "warmup_iterations": 3,
+        "temperature_moves": 12,
+        "mcts_c_puct": 1.25,
+        "mcts_dirichlet_alpha": 0.15,
+        "channels": 96,
+        "residual_blocks": 6,
+        "policy_channels": 8,
+        "value_channels": 4,
+        "value_hidden": 256,
+        "checkpoint_dir": "alphazero_gomoku/outputs/checkpoints/a100-fast",
+        "replay_path": "alphazero_gomoku/outputs/replay/a100-fast_replay.pt",
+        "metrics_path": "alphazero_gomoku/outputs/metrics/a100-fast.jsonl",
+        "self_play_workers": 16,
+        "self_play_devices": "auto",
+        "data_parallel": False,
+        "train_data_workers": 2,
+    },
+    "a100-turbo": {
+        "iterations": 12,
+        "games_per_iteration": 128,
+        "simulations": 32,
+        "mcts_batch_size": 16,
+        "epochs": 2,
+        "train_steps_per_iteration": 16,
+        "batch_size": 8192,
+        "replay_size": 150_000,
+        "learning_rate": 3.0e-4,
+        "min_learning_rate": 3.0e-5,
+        "lr_schedule": "cosine",
+        "warmup_iterations": 2,
+        "temperature_moves": 10,
+        "mcts_c_puct": 1.25,
+        "mcts_dirichlet_alpha": 0.15,
+        "channels": 64,
+        "residual_blocks": 4,
+        "policy_channels": 4,
+        "value_channels": 2,
+        "value_hidden": 192,
+        "checkpoint_dir": "alphazero_gomoku/outputs/checkpoints/a100-turbo",
+        "replay_path": "alphazero_gomoku/outputs/replay/a100-turbo_replay.pt",
+        "metrics_path": "alphazero_gomoku/outputs/metrics/a100-turbo.jsonl",
+        "self_play_workers": 16,
+        "self_play_devices": "auto",
+        "data_parallel": False,
+        "train_data_workers": 2,
+    },
+}
+
+
+def preset_config(name: str) -> TrainConfig:
+    if name not in PRESETS:
+        raise ValueError(f"unknown preset: {name}")
+    cfg = TrainConfig(preset=name)
+    for key, value in PRESETS[name].items():
+        setattr(cfg, key, value)
+    return cfg
 
 
 def split_devices(device_spec: str, fallback_device: str) -> list[str]:
@@ -569,19 +536,6 @@ def split_devices(device_spec: str, fallback_device: str) -> list[str]:
         return [fallback_device]
     devices = [device.strip() for device in device_spec.split(",") if device.strip()]
     return devices or [fallback_device]
-
-
-def unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
-    if isinstance(model, torch.nn.DataParallel):
-        return model.module
-    return model
-
-
-def cpu_state_dict(model: torch.nn.Module) -> dict[str, torch.Tensor]:
-    return {
-        name: tensor.detach().cpu()
-        for name, tensor in unwrap_model(model).state_dict().items()
-    }
 
 
 def make_model(cfg: TrainConfig) -> PolicyValueNet:
@@ -975,12 +929,15 @@ def collect_self_play_examples(
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     model_state_path = str(snapshot_dir / "model.pt")
     torch.save(cpu_state_dict(model), model_state_path)
-    if sys.platform == "win32":
-        executor_context = concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs))
-    else:
-        executor_context = concurrent.futures.ProcessPoolExecutor(
-            max_workers=len(jobs), mp_context=context
-        )
+    # Process isolation (spawn) on every platform. Two reasons it must not be a
+    # ThreadPool on Windows: (1) the per-move MCTS is Python-bound, so threads
+    # serialise on the GIL and give no real parallelism; (2) each worker calls
+    # set_seed() on the *global* RNGs — under threads they share one interpreter
+    # and stomp each other's RNG state, silently corrupting self-play seeding.
+    # Separate processes have independent globals, so set_seed() works per worker.
+    executor_context = concurrent.futures.ProcessPoolExecutor(
+        max_workers=len(jobs), mp_context=context
+    )
     try:
         with executor_context as executor:
             futures = [
@@ -1070,20 +1027,26 @@ def effective_train_steps(cfg: TrainConfig, examples: int) -> int:
     return min(cfg.train_steps_per_iteration, capped_steps)
 
 
-def train_epoch(
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
-    replay: deque[Example],
+@dataclass
+class LossParts:
+    """Per-step loss tensors returned by :func:`compute_step_losses`."""
+
+    loss: torch.Tensor
+    policy_loss: torch.Tensor
+    value_loss: torch.Tensor
+    soft_policy_loss: torch.Tensor
+    policy_kl: torch.Tensor
+    target_entropy: torch.Tensor
+    pred_entropy: torch.Tensor
+
+
+def build_train_loader(
+    dataset: TensorDataset,
+    sample_weights: torch.Tensor | None,
     cfg: TrainConfig,
-    scaler: object | None,
-    dataset: TensorDataset | None = None,
-    sample_weights: torch.Tensor | None = None,
-    train_steps_to_run: int | None = None,
-) -> TrainStats:
-    if dataset is None:
-        dataset, sample_weights = replay_to_dataset(
-            replay, kl_buffer=None
-        )
+) -> DataLoader:
+    """Construct the training DataLoader (weighted sampler when surprise
+    weighting is on, plain shuffle otherwise)."""
     use_weighted = cfg.surprise_weighting and sample_weights is not None
     # drop_last keeps batch sizes uniform under fixed step counts, but with a
     # buffer smaller than one batch it would yield an empty loader and skip the
@@ -1105,21 +1068,80 @@ def train_epoch(
             num_samples=len(dataset),
             replacement=True,
         )
-        loader = DataLoader(
-            dataset,
-            sampler=sampler,
-            **loader_kwargs,
+        return DataLoader(dataset, sampler=sampler, **loader_kwargs)
+    return DataLoader(dataset, shuffle=True, **loader_kwargs)
+
+
+def compute_step_losses(
+    logits: torch.Tensor,
+    soft_logits: torch.Tensor | None,
+    predicted_values: torch.Tensor,
+    batch_policies: torch.Tensor,
+    batch_values: torch.Tensor,
+    pw: torch.Tensor,
+    cfg: TrainConfig,
+) -> LossParts:
+    """Compute the combined policy/value(/soft-policy) loss and its diagnostic
+    parts for one batch. Policy terms are weighted by ``pw`` (1 for full-search
+    samples, 0 for value-only cheap-search samples)."""
+    policy_count = pw.sum().clamp_min(1.0)
+    log_probs = F.log_softmax(logits, dim=1)
+    pred_probs = F.softmax(logits, dim=1)
+    target_entropy_rows = -(batch_policies * torch.log(batch_policies.clamp_min(1.0e-8))).sum(dim=1)
+    pred_entropy_rows = -(pred_probs * torch.log(pred_probs.clamp_min(1.0e-8))).sum(dim=1)
+    target_entropy = (target_entropy_rows * pw).sum() / policy_count
+    pred_entropy = (pred_entropy_rows * pw).sum() / policy_count
+    policy_ce_rows = -(batch_policies * log_probs).sum(dim=1)
+    policy_loss = (policy_ce_rows * pw).sum() / policy_count
+    policy_kl_rows = (
+        batch_policies * (torch.log(batch_policies.clamp_min(1.0e-8)) - log_probs)
+    ).sum(dim=1)
+    policy_kl = (policy_kl_rows * pw).sum() / policy_count
+    value_loss = F.mse_loss(predicted_values, batch_values)
+    loss = cfg.policy_loss_weight * policy_loss + cfg.value_loss_weight * value_loss
+
+    # KataGo auxiliary soft policy loss: target = π^(1/T), teaches the network
+    # to discriminate among non-top moves and speeds up learning.
+    soft_policy_loss = torch.tensor(0.0, device=logits.device)
+    if soft_logits is not None and cfg.soft_policy_loss_weight > 0:
+        T = max(1e-3, cfg.soft_policy_temp)
+        soft_target = batch_policies.pow(1.0 / T)
+        soft_target = soft_target / soft_target.sum(dim=1, keepdim=True).clamp_min(1e-8)
+        soft_log_probs = F.log_softmax(soft_logits.float(), dim=1)
+        soft_ce_rows = -(soft_target * soft_log_probs).sum(dim=1)
+        soft_policy_loss = (soft_ce_rows * pw).sum() / policy_count
+        loss = loss + cfg.soft_policy_loss_weight * soft_policy_loss
+
+    return LossParts(
+        loss=loss,
+        policy_loss=policy_loss,
+        value_loss=value_loss,
+        soft_policy_loss=soft_policy_loss,
+        policy_kl=policy_kl,
+        target_entropy=target_entropy,
+        pred_entropy=pred_entropy,
+    )
+
+
+def train_epoch(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    replay: deque[Example],
+    cfg: TrainConfig,
+    scaler: object | None,
+    dataset: TensorDataset | None = None,
+    sample_weights: torch.Tensor | None = None,
+    train_steps_to_run: int | None = None,
+) -> TrainStats:
+    if dataset is None:
+        dataset, sample_weights = replay_to_dataset(
+            replay, kl_buffer=None
         )
-    else:
-        loader = DataLoader(
-            dataset,
-            shuffle=True,
-            **loader_kwargs,
-        )
+    loader = build_train_loader(dataset, sample_weights, cfg)
 
     model.train()
     totals = TrainStats(lr=float(optimizer.param_groups[0]["lr"]))
-    autocast_ctx = autocast_context(cfg.device, cfg.amp, cfg.amp_dtype)
+    autocast_ctx = autocast_for(cfg.device, cfg.amp_dtype if cfg.amp else "none")
 
     if train_steps_to_run is not None:
         steps_to_run = train_steps_to_run
@@ -1129,6 +1151,7 @@ def train_epoch(
         steps_to_run = len(loader)
     loader_iter = iter(loader)
     policy_samples = 0.0
+    value_acc_count = 0.0
     for _ in range(steps_to_run):
         try:
             batch_states, batch_policies, batch_values, batch_policy_weights = next(loader_iter)
@@ -1197,35 +1220,16 @@ def train_epoch(
         # Policy losses and metrics only count full-search samples (policy_weight=1);
         # value-only samples from cheap searches contribute zero weight.
         pw = batch_policy_weights
-        policy_count = pw.sum().clamp_min(1.0)
-        log_probs = F.log_softmax(logits, dim=1)
-        pred_probs = F.softmax(logits, dim=1)
-        target_entropy_rows = -(batch_policies * torch.log(batch_policies.clamp_min(1.0e-8))).sum(dim=1)
-        pred_entropy_rows = -(pred_probs * torch.log(pred_probs.clamp_min(1.0e-8))).sum(dim=1)
-        target_entropy = (target_entropy_rows * pw).sum() / policy_count
-        pred_entropy = (pred_entropy_rows * pw).sum() / policy_count
-        policy_ce_rows = -(batch_policies * log_probs).sum(dim=1)
-        policy_loss = (policy_ce_rows * pw).sum() / policy_count
-        policy_kl_rows = (
-            batch_policies * (torch.log(batch_policies.clamp_min(1.0e-8)) - log_probs)
-        ).sum(dim=1)
-        policy_kl = (policy_kl_rows * pw).sum() / policy_count
-        value_loss = F.mse_loss(predicted_values, batch_values)
-        loss = cfg.policy_loss_weight * policy_loss + cfg.value_loss_weight * value_loss
-
-        # KataGo auxiliary soft policy loss: target = π^(1/T), teaches the network
-        # to discriminate among non-top moves and speeds up learning
-        soft_policy_loss = torch.tensor(0.0, device=cfg.device)
-        if soft_logits is not None and cfg.soft_policy_loss_weight > 0:
-            soft_logits_f = soft_logits.float()
-            T = max(1e-3, cfg.soft_policy_temp)
-            # soft target: π^(1/T) renormalised
-            soft_target = batch_policies.pow(1.0 / T)
-            soft_target = soft_target / soft_target.sum(dim=1, keepdim=True).clamp_min(1e-8)
-            soft_log_probs = F.log_softmax(soft_logits_f, dim=1)
-            soft_ce_rows = -(soft_target * soft_log_probs).sum(dim=1)
-            soft_policy_loss = (soft_ce_rows * pw).sum() / policy_count
-            loss = loss + cfg.soft_policy_loss_weight * soft_policy_loss
+        parts = compute_step_losses(
+            logits, soft_logits, predicted_values, batch_policies, batch_values, pw, cfg
+        )
+        loss = parts.loss
+        policy_loss = parts.policy_loss
+        value_loss = parts.value_loss
+        soft_policy_loss = parts.soft_policy_loss
+        policy_kl = parts.policy_kl
+        target_entropy = parts.target_entropy
+        pred_entropy = parts.pred_entropy
 
         if (not torch.isfinite(loss)) or loss.item() > cfg.max_loss:
             totals.skipped += 1
@@ -1278,12 +1282,8 @@ def train_epoch(
 
         target_best = batch_policies.argmax(dim=1)
         pred_best = logits.argmax(dim=1)
-        value_acc = (torch.sign(predicted_values.detach()) == torch.sign(batch_values)).float()
-        non_draw = batch_values.abs() > 1.0e-6
-        if non_draw.any():
-            value_acc_mean = value_acc[non_draw].mean()
-        else:
-            value_acc_mean = torch.tensor(1.0, device=batch_values.device)
+        value_correct = (torch.sign(predicted_values.detach()) == torch.sign(batch_values)).float()
+        non_draw = (batch_values.abs() > 1.0e-6).float()
 
         batch_size = batch_states.shape[0]
         pc = float(pw.sum().item())
@@ -1296,7 +1296,10 @@ def train_epoch(
         totals.pred_entropy += float(pred_entropy.item()) * pc
         totals.policy_top1 += float(((target_best == pred_best).float() * pw).sum().item())
         totals.value_mae += float((predicted_values.detach() - batch_values).abs().mean().item()) * batch_size
-        totals.value_acc += float(value_acc_mean.item()) * batch_size
+        # value_acc is a rate over non-draw positions only, so weight it by the
+        # non-draw count (not batch_size) to avoid biasing draw-heavy batches.
+        totals.value_acc += float((value_correct * non_draw).sum().item())
+        value_acc_count += float(non_draw.sum().item())
         totals.grad_norm += grad_norm_value * batch_size
         totals.batches += batch_size
         policy_samples += pc
@@ -1313,9 +1316,36 @@ def train_epoch(
     totals.pred_entropy /= policy_denom
     totals.policy_top1 /= policy_denom
     totals.value_mae /= denom
-    totals.value_acc /= denom
+    totals.value_acc /= max(1.0, value_acc_count)
     totals.grad_norm /= denom
     return totals
+
+
+def mcts_config_from_train(
+    cfg: TrainConfig, simulations: int, *, for_eval: bool = False
+) -> MCTSConfig:
+    """Build the runtime MCTSConfig from a TrainConfig.
+
+    Single source of truth for self-play and evaluation MCTS settings.
+    ``for_eval=True`` omits forced playouts: evaluation must not inject the
+    extra exploration that self-play relies on for policy-target diversity.
+    """
+    kwargs: dict = dict(
+        simulations=simulations,
+        c_puct=cfg.mcts_c_puct,
+        dirichlet_alpha=cfg.mcts_dirichlet_alpha,
+        dirichlet_fraction=cfg.mcts_dirichlet_fraction,
+        eval_batch_size=min(cfg.mcts_batch_size, max(1, simulations)),
+        amp_dtype=cfg.mcts_amp_dtype,
+        root_policy_temp=cfg.mcts_root_policy_temp,
+        shaped_dirichlet=cfg.mcts_shaped_dirichlet,
+        dynamic_cpuct=cfg.mcts_dynamic_cpuct,
+        fpu_reduction=cfg.mcts_fpu_reduction,
+    )
+    if not for_eval:
+        kwargs["forced_playouts"] = cfg.mcts_forced_playouts
+        kwargs["forced_playout_k"] = cfg.mcts_forced_playout_k
+    return MCTSConfig(**kwargs)
 
 
 def select_mcts_action(
@@ -1327,18 +1357,7 @@ def select_mcts_action(
 ) -> int:
     root = MCTS(
         model,
-        MCTSConfig(
-            simulations=simulations,
-            c_puct=cfg.mcts_c_puct,
-            dirichlet_alpha=cfg.mcts_dirichlet_alpha,
-            dirichlet_fraction=cfg.mcts_dirichlet_fraction,
-            eval_batch_size=min(cfg.mcts_batch_size, max(1, simulations)),
-            amp_dtype=cfg.mcts_amp_dtype,
-            root_policy_temp=cfg.mcts_root_policy_temp,
-            shaped_dirichlet=cfg.mcts_shaped_dirichlet,
-            dynamic_cpuct=cfg.mcts_dynamic_cpuct,
-            fpu_reduction=cfg.mcts_fpu_reduction,
-        ),
+        mcts_config_from_train(cfg, simulations, for_eval=True),
         device=device,
     ).search(state, add_exploration_noise=False)
     policy = visit_count_policy(root, state.action_size, temperature=0.0)
@@ -1350,15 +1369,40 @@ def select_mcts_action(
 
 def random_opening(cfg: TrainConfig, rng: random.Random) -> list[int]:
     """Uniform random legal opening moves for evaluation games."""
+    return _random_opening_plies(
+        cfg.board_size, cfg.win_length, max(0, cfg.eval_opening_moves), rng
+    )
+
+
+def play_eval_game(
+    candidate: PolicyValueNet,
+    baseline: PolicyValueNet,
+    cfg: TrainConfig,
+    opening: list[int],
+    candidate_player: int,
+    device: str,
+) -> tuple[str, int]:
+    """Play one candidate-vs-baseline game from a fixed opening.
+
+    Returns ``(outcome, moves_played)`` where outcome is one of
+    ``"candidate" | "baseline" | "draw"``. Seeding is the caller's
+    responsibility: parallel workers reseed per game for reproducibility, while
+    the serial path inherits the run's global RNG state.
+    """
     state = GomokuState.new(size=cfg.board_size, win_length=cfg.win_length)
-    opening: list[int] = []
-    for _ in range(max(0, cfg.eval_opening_moves)):
-        if state.is_terminal:
-            break
-        action = int(rng.choice(list(state.legal_actions())))
-        opening.append(action)
+    for action in opening:
         state = state.apply(action)
-    return opening
+    while not state.is_terminal:
+        model = candidate if state.current_player == candidate_player else baseline
+        action = select_mcts_action(model, state, cfg.eval_simulations, device, cfg)
+        state = state.apply(action)
+    if state.winner == 0:
+        outcome = "draw"
+    elif state.winner == candidate_player:
+        outcome = "candidate"
+    else:
+        outcome = "baseline"
+    return outcome, state.moves_played
 
 
 def play_eval_game_worker(
@@ -1384,28 +1428,15 @@ def play_eval_game_worker(
     results: list[dict[str, object]] = []
     for game_index, opening, candidate_player in jobs:
         set_seed(cfg.seed + 50_000 + iteration * 1_000 + game_index)
-        state = GomokuState.new(size=cfg.board_size, win_length=cfg.win_length)
-        for action in opening:
-            state = state.apply(action)
-        while not state.is_terminal:
-            if state.current_player == candidate_player:
-                action = select_mcts_action(candidate, state, cfg.eval_simulations, device, cfg)
-            else:
-                action = select_mcts_action(baseline, state, cfg.eval_simulations, device, cfg)
-            state = state.apply(action)
-
-        if state.winner == 0:
-            outcome = "draw"
-        elif state.winner == candidate_player:
-            outcome = "candidate"
-        else:
-            outcome = "baseline"
+        outcome, moves = play_eval_game(
+            candidate, baseline, cfg, opening, candidate_player, device
+        )
         results.append(
             {
                 "game_index": game_index,
                 "candidate_player": candidate_player,
                 "outcome": outcome,
-                "moves": state.moves_played,
+                "moves": moves,
                 "device": device,
             }
         )
@@ -1493,12 +1524,10 @@ def evaluate_candidate(
                 f"reason=all_games_already_dispatched",
                 flush=True,
             )
-        if sys.platform == "win32":
-            executor_context = concurrent.futures.ThreadPoolExecutor(max_workers=worker_count)
-        else:
-            executor_context = concurrent.futures.ProcessPoolExecutor(
-                max_workers=worker_count, mp_context=context
-            )
+        # Process isolation (spawn) on every platform — see collect_self_play_examples.
+        executor_context = concurrent.futures.ProcessPoolExecutor(
+            max_workers=worker_count, mp_context=context
+        )
         try:
             with executor_context as executor:
                 futures = [
@@ -1579,25 +1608,16 @@ def evaluate_candidate(
     cutoff_reason = ""
     threshold_score = cfg.promotion_threshold * cfg.eval_games
     for game_index in range(cfg.eval_games):
-        state = GomokuState.new(size=cfg.board_size, win_length=cfg.win_length)
-        for action in openings[game_index // 2]:
-            state = state.apply(action)
         candidate_player = 1 if game_index % 2 == 0 else -1
-        while not state.is_terminal:
-            if state.current_player == candidate_player:
-                action = select_mcts_action(candidate, state, cfg.eval_simulations, cfg.device, cfg)
-            else:
-                action = select_mcts_action(baseline, state, cfg.eval_simulations, cfg.device, cfg)
-            state = state.apply(action)
-        if state.winner == 0:
+        outcome, moves = play_eval_game(
+            candidate, baseline, cfg, openings[game_index // 2], candidate_player, cfg.device
+        )
+        if outcome == "draw":
             draws += 1
-            outcome = "draw"
-        elif state.winner == candidate_player:
+        elif outcome == "candidate":
             wins += 1
-            outcome = "candidate"
         else:
             losses += 1
-            outcome = "baseline"
         played += 1
         score = wins + 0.5 * draws
         remaining = cfg.eval_games - played
@@ -1607,7 +1627,7 @@ def evaluate_candidate(
             print(
                 f"eval_game{iter_label} game={played}/{cfg.eval_games} "
                 f"candidate_color={'black' if candidate_player == 1 else 'white'} "
-                f"outcome={outcome} moves={state.moves_played} "
+                f"outcome={outcome} moves={moves} "
                 f"score={score / max(1, cfg.eval_games):.3f} "
                 f"wins={wins} losses={losses} draws={draws} "
                 f"elapsed={format_duration(time.monotonic() - eval_start)}",
@@ -1733,20 +1753,7 @@ def run_training(cfg: TrainConfig) -> None:
     replay, kl_buffer = load_replay(cfg)
     if cfg.playout_cap_randomization and cfg.fast_simulations <= 0:
         cfg.fast_simulations = max(1, cfg.simulations // 4)
-    mcts_cfg = MCTSConfig(
-        simulations=cfg.simulations,
-        c_puct=cfg.mcts_c_puct,
-        dirichlet_alpha=cfg.mcts_dirichlet_alpha,
-        dirichlet_fraction=cfg.mcts_dirichlet_fraction,
-        eval_batch_size=cfg.mcts_batch_size,
-        amp_dtype=cfg.mcts_amp_dtype,
-        root_policy_temp=cfg.mcts_root_policy_temp,
-        shaped_dirichlet=cfg.mcts_shaped_dirichlet,
-        dynamic_cpuct=cfg.mcts_dynamic_cpuct,
-        fpu_reduction=cfg.mcts_fpu_reduction,
-        forced_playouts=cfg.mcts_forced_playouts,
-        forced_playout_k=cfg.mcts_forced_playout_k,
-    )
+    mcts_cfg = mcts_config_from_train(cfg, cfg.simulations, for_eval=False)
     scaler = make_grad_scaler(cfg.amp and cfg.device.startswith("cuda"), cfg.amp_dtype)
     champion = copy.deepcopy(base_model).to(cfg.device) if cfg.eval_interval and cfg.eval_games else None
     if cfg.early_stop_evals > 0 and champion is None:

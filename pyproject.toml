@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alphazero-gomoku"
+version = "0.1.0"
+description = "10x10 AlphaZero-style Gomoku: self-play, MCTS, training, distillation, and a static browser app."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "torch",
+]
+
+[project.optional-dependencies]
+# Plotting training curves (scripts/plot_training_metrics.py)
+plot = ["matplotlib"]
+# Exporting checkpoints to ONNX for the browser app (scripts/export_pages_model.py)
+export = ["onnx"]
+dev = ["matplotlib", "onnx"]
+
+[project.scripts]
+gomoku-play = "alphazero_gomoku.play:main"
+gomoku-train = "alphazero_gomoku.train:main"
+
+# The repository root *is* the importable ``alphazero_gomoku`` package (game.py,
+# mcts.py, ... live at the top level and are imported as ``alphazero_gomoku.*``
+# from the parent directory). Map the package name to this directory so
+# ``pip install -e .`` makes ``import alphazero_gomoku`` work without the
+# PYTHONPATH / sys.path dance the scripts fall back to when not installed.
+[tool.setuptools]
+package-dir = { "alphazero_gomoku" = "." }
+packages = ["alphazero_gomoku"]

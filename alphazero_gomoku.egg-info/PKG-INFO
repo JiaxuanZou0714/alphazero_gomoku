@@ -1,3 +1,19 @@
+Metadata-Version: 2.4
+Name: alphazero-gomoku
+Version: 0.1.0
+Summary: 10x10 AlphaZero-style Gomoku: self-play, MCTS, training, distillation, and a static browser app.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy
+Requires-Dist: torch
+Provides-Extra: plot
+Requires-Dist: matplotlib; extra == "plot"
+Provides-Extra: export
+Requires-Dist: onnx; extra == "export"
+Provides-Extra: dev
+Requires-Dist: matplotlib; extra == "dev"
+Requires-Dist: onnx; extra == "dev"
+
 # 10x10 AlphaZero 五子棋
 
 面向 `10x10` 棋盘的 AlphaZero 风格五子棋项目：自我对弈、神经网络引导的 MCTS、训练、蒸馏、checkpoint 对战评估，以及一个无需后端的 GitHub Pages 浏览器对弈页面。
