@@ -64,7 +64,7 @@ def teacher_raw_target(
 ) -> tuple[np.ndarray, float]:
     encoded = tensor_from_array(state.encode()[None, ...], dtype=torch.float32, device=device)
     with torch.inference_mode():
-        logits, _, value = teacher(encoded)
+        logits, _, value, _ = teacher(encoded)
     policy = numpy_policy_from_logits(logits[0], state.legal_mask(), policy_temperature)
     return policy, float(value[0].detach().cpu().item())
 
@@ -287,7 +287,7 @@ def train_student(
             batch_values = values[batch_indices].to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
-            policy_logits, soft_logits, predicted_values = student(batch_states)
+            policy_logits, soft_logits, predicted_values, _ = student(batch_states)
             legal_logits = policy_logits.float().masked_fill(~batch_masks, -1.0e9)
             log_probs = F.log_softmax(legal_logits, dim=1)
             policy_loss_rows = -(batch_policies * log_probs).sum(dim=1)

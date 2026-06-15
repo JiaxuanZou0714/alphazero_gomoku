@@ -23,7 +23,7 @@ class WebPolicyValueNet(nn.Module):
         self.model = model
 
     def forward(self, board: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        policy_logits, _, value = self.model(board)
+        policy_logits, _, value, _ = self.model(board)
         return policy_logits.float(), value.float()
 
 

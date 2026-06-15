@@ -20,7 +20,7 @@ class UniformNet(torch.nn.Module):
 
     def forward(self, x: torch.Tensor):
         n = x.shape[0]
-        return torch.zeros(n, self.action_size), None, torch.zeros(n)
+        return torch.zeros(n, self.action_size), None, torch.zeros(n), None
 
 
 class CountingNet(UniformNet):

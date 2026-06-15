@@ -16,9 +16,10 @@ class ModelTest(unittest.TestCase):
         model = PolicyValueNet(channels=8, residual_blocks=1, value_hidden=16)
         model.eval()
         x = torch.zeros(3, 2, 10, 10)
-        policy_logits, soft_logits, value = model(x)
+        policy_logits, soft_logits, value, ownership = model(x)
         self.assertEqual(policy_logits.shape, (3, 100))
         self.assertIsNone(soft_logits)  # off by default
+        self.assertIsNone(ownership)  # off by default
         self.assertEqual(value.shape, (3,))
         self.assertTrue(torch.all(value >= -1.0) and torch.all(value <= 1.0))
 
@@ -26,9 +27,18 @@ class ModelTest(unittest.TestCase):
         model = PolicyValueNet(
             channels=8, residual_blocks=1, value_hidden=16, use_soft_policy=True
         )
-        _, soft_logits, _ = model(torch.zeros(1, 2, 10, 10))
+        _, soft_logits, _, _ = model(torch.zeros(1, 2, 10, 10))
         self.assertIsNotNone(soft_logits)
         self.assertEqual(soft_logits.shape, (1, 100))
+
+    def test_ownership_head_present_when_enabled(self) -> None:
+        model = PolicyValueNet(
+            channels=8, residual_blocks=1, value_hidden=16, use_ownership=True
+        )
+        _, _, _, ownership = model(torch.zeros(2, 2, 10, 10))
+        self.assertIsNotNone(ownership)
+        self.assertEqual(ownership.shape, (2, 100))
+        self.assertTrue(torch.all(ownership >= -1.0) and torch.all(ownership <= 1.0))
 
     def test_build_from_config_round_trip(self) -> None:
         cfg = {

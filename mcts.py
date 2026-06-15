@@ -272,7 +272,7 @@ class MCTS:
 
         autocast_ctx = self._autocast_context()
         with torch.inference_mode(), autocast_ctx:
-            policy_logits, _, values_batch = self.model(encoded)
+            policy_logits, _, values_batch, _ = self.model(encoded)
             logits_np = torch.nan_to_num(
                 policy_logits.float(), nan=0.0, posinf=0.0, neginf=0.0
             ).cpu().numpy()  # (N, A)

@@ -333,11 +333,48 @@ class SymmetryTest(unittest.TestCase):
         b = 10
         x = torch.randn(5, 2, b, b)
         p = torch.softmax(torch.randn(5, b * b), dim=1)
-        out_x, out_p = apply_random_symmetries(x.clone(), p.clone(), b)
+        own = torch.randn(5, b * b)
+        out_x, out_p, out_own = apply_random_symmetries(x.clone(), p.clone(), b, own.clone())
         self.assertEqual(out_x.shape, x.shape)
         self.assertEqual(out_p.shape, p.shape)
+        self.assertEqual(out_own.shape, own.shape)
         # each output row is a permutation of the corresponding input policy row
         self.assertTrue(torch.allclose(out_p.sum(1), p.sum(1), atol=1e-5))
+        # ownership is permuted with the SAME symmetry as the policy (sum preserved)
+        self.assertTrue(torch.allclose(out_own.sum(1), own.sum(1), atol=1e-5))
+
+
+class OwnershipDataTest(unittest.TestCase):
+    def _examples_with_ownership(self, n: int):
+        exs = []
+        for i in range(n):
+            s = np.zeros((2, 10, 10), dtype=np.float32)
+            p = np.full(100, 0.01, dtype=np.float32)
+            own = np.zeros(100, dtype=np.float32)
+            own[i % 100] = 1.0
+            exs.append((s, p, 0.5, 1.0, own))
+        return deque(exs)
+
+    def test_replay_to_dataset_adds_ownership_column_when_enabled(self) -> None:
+        ds, _ = replay_to_dataset(self._examples_with_ownership(6), None, use_ownership=True)
+        self.assertEqual(len(ds.tensors), 5)
+        self.assertEqual(ds.tensors[4].shape, (6, 100))
+
+    def test_replay_to_dataset_omits_ownership_when_disabled(self) -> None:
+        ds, _ = replay_to_dataset(self._examples_with_ownership(6), None, use_ownership=False)
+        self.assertEqual(len(ds.tensors), 4)
+
+    def test_train_epoch_with_ownership_runs(self) -> None:
+        torch.manual_seed(0)
+        model = PolicyValueNet(channels=8, residual_blocks=1, value_hidden=16, use_ownership=True)
+        opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+        cfg = TrainConfig(
+            batch_size=4, train_steps_per_iteration=2, channels=8, residual_blocks=1,
+            value_hidden=16, use_ownership=True, ownership_loss_weight=0.15, device="cpu",
+        )
+        ds, _ = replay_to_dataset(self._examples_with_ownership(8), None, use_ownership=True)
+        stats = train_epoch(model, opt, deque(), cfg, None, dataset=ds, train_steps_to_run=2)
+        self.assertTrue(np.isfinite(stats.loss))
 
 
 if __name__ == "__main__":

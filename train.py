@@ -32,9 +32,10 @@ from .utils import (
     unwrap_model,
 )
 
-# (encoded_state, mcts_policy, value, policy_weight). policy_weight is 0 for
-# positions from cheap searches (playout cap randomization): they only train
-# the value head.
+# (encoded_state, mcts_policy, value, policy_weight[, ownership]). policy_weight
+# is 0 for positions from cheap searches (playout cap randomization): they only
+# train the value head. The optional 5th element is the per-cell ownership target
+# (board_size**2,), present only when use_ownership is enabled.
 Example = tuple[np.ndarray, np.ndarray, float, float]
 
 
@@ -635,8 +636,10 @@ def load_replay(cfg: TrainConfig) -> tuple[deque[Example], deque[float]]:
         examples = loaded
         kls = []
     examples = examples[-cfg.replay_size:]
+    # Preserve 4-tuples and 5-tuples (with ownership) as-is; pad legacy v1
+    # 3-tuples to a default full-search weight.
     examples = [
-        item if len(item) == 4 else (item[0], item[1], item[2], 1.0)
+        item if len(item) >= 4 else (item[0], item[1], item[2], 1.0)
         for item in examples
     ]
     replay.extend(examples)
@@ -699,8 +702,11 @@ def symmetry_permutations(board_size: int, device: torch.device) -> torch.Tensor
 
 
 def apply_random_symmetries(
-    states: torch.Tensor, policies: torch.Tensor, board_size: int
-) -> tuple[torch.Tensor, torch.Tensor]:
+    states: torch.Tensor,
+    policies: torch.Tensor,
+    board_size: int,
+    ownership: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Apply an independent random dihedral symmetry to each sample in a batch.
 
     The buffer stores raw examples and the transform is applied at sampling
@@ -712,7 +718,7 @@ def apply_random_symmetries(
     """
     n = states.shape[0]
     if n == 0:
-        return states, policies
+        return states, policies, ownership
     area = board_size * board_size
     channels = states.shape[1]
     perm = symmetry_permutations(board_size, states.device)  # (8, area)
@@ -724,7 +730,10 @@ def apply_random_symmetries(
         gather_idx.unsqueeze(1).expand(n, channels, area),
     ).reshape(n, channels, board_size, board_size)
     out_pol = torch.gather(policies, 1, gather_idx)
-    return out_states, out_pol
+    # Ownership is per-cell and spatial like the policy, so it gets the SAME
+    # per-sample symmetry to stay aligned with the transformed board.
+    out_own = torch.gather(ownership, 1, gather_idx) if ownership is not None else None
+    return out_states, out_pol, out_own
 
 
 def play_self_game(
@@ -805,6 +814,10 @@ def play_self_game(
 
     examples: list[Example] = []
     w = cfg.mcts_value_weight
+    # KataGo ownership target: the final board from each position's player
+    # perspective (+1 own stone, -1 opponent, 0 empty). board * player maps the
+    # absolute board (1=black, -1=white) into that perspective.
+    final_board = state.board.reshape(-1).astype(np.float32)
     for encoded, policy, player, mcts_val, policy_weight in history:
         if state.winner == 0:
             terminal_v = 0.0
@@ -812,7 +825,11 @@ def play_self_game(
             terminal_v = 1.0 if state.winner == player else -1.0
         # KataGo short-term value: blend terminal result with MCTS value estimate
         value = (1.0 - w) * terminal_v + w * mcts_val if w > 0 else terminal_v
-        examples.append((encoded.astype(np.float32), policy, float(value), policy_weight))
+        if cfg.use_ownership:
+            ownership = final_board * float(player)
+            examples.append((encoded.astype(np.float32), policy, float(value), policy_weight, ownership))
+        else:
+            examples.append((encoded.astype(np.float32), policy, float(value), policy_weight))
 
     stats = {
         "policy_entropy": float(np.mean(entropies)) if entropies else 0.0,
@@ -1030,11 +1047,14 @@ def collect_self_play_examples(
 def replay_to_dataset(
     replay: deque[Example],
     kl_buffer: deque[float] | None = None,
+    use_ownership: bool = False,
 ) -> tuple[TensorDataset, torch.Tensor | None]:
     """Convert replay buffer to TensorDataset.
 
     Returns (dataset, weights) where weights is a 1-D tensor of per-sample
     surprise weights for WeightedRandomSampler, or None if kl_buffer is absent.
+    When use_ownership is set and every example carries an ownership target, the
+    dataset gains a 5th column with the per-cell ownership labels.
     """
     states = tensor_from_array(np.stack([item[0] for item in replay]), dtype=torch.float32)
     policies = tensor_from_array(np.stack([item[1] for item in replay]), dtype=torch.float32)
@@ -1047,7 +1067,16 @@ def replay_to_dataset(
         raise RuntimeError(
             f"value labels out of range: min={float(values.min())} max={float(values.max())}"
         )
-    dataset = TensorDataset(states, policies, values, policy_weights)
+    columns = [states, policies, values, policy_weights]
+    # Ownership column only when enabled AND every example has it (a buffer that
+    # mixes pre/post-ownership examples, e.g. mid-resume, simply trains without
+    # ownership until it refills).
+    if use_ownership and replay and all(len(item) >= 5 for item in replay):
+        ownership = tensor_from_array(
+            np.stack([item[4] for item in replay]), dtype=torch.float32
+        )
+        columns.append(ownership)
+    dataset = TensorDataset(*columns)
     weights = None
     if kl_buffer is not None and len(kl_buffer) == len(replay):
         kl = np.array(list(kl_buffer), dtype=np.float32)
@@ -1175,7 +1204,7 @@ def train_epoch(
 ) -> TrainStats:
     if dataset is None:
         dataset, sample_weights = replay_to_dataset(
-            replay, kl_buffer=None
+            replay, kl_buffer=None, use_ownership=cfg.use_ownership
         )
     loader = build_train_loader(dataset, sample_weights, cfg)
 
@@ -1194,13 +1223,13 @@ def train_epoch(
     value_acc_count = 0.0
     for _ in range(steps_to_run):
         try:
-            batch_states, batch_policies, batch_values, batch_policy_weights = next(loader_iter)
+            batch = next(loader_iter)
         except StopIteration:
             if cfg.train_steps_per_iteration <= 0:
                 break
             loader_iter = iter(loader)
             try:
-                batch_states, batch_policies, batch_values, batch_policy_weights = next(loader_iter)
+                batch = next(loader_iter)
             except StopIteration:
                 # drop_last=True with fewer examples than one batch: nothing to train on
                 print(
@@ -1210,10 +1239,15 @@ def train_epoch(
                 )
                 break
 
+        batch_states, batch_policies, batch_values, batch_policy_weights = batch[:4]
+        batch_ownership = batch[4] if len(batch) > 4 else None
+
         batch_states = batch_states.to(cfg.device, non_blocking=True)
         batch_policies = batch_policies.to(cfg.device, non_blocking=True)
         batch_values = batch_values.to(cfg.device, non_blocking=True)
         batch_policy_weights = batch_policy_weights.to(cfg.device, non_blocking=True)
+        if batch_ownership is not None:
+            batch_ownership = batch_ownership.to(cfg.device, non_blocking=True)
         # (value-label range is validated once at dataset build in replay_to_dataset,
         # not per batch — augmentation is a permutation and cannot push it out of range.)
         policy_sums = batch_policies.sum(dim=1)
@@ -1223,12 +1257,12 @@ def train_epoch(
             batch_policies = batch_policies / policy_sums.clamp_min(1.0e-8).unsqueeze(1)
 
         if cfg.augment_symmetries:
-            batch_states, batch_policies = apply_random_symmetries(
-                batch_states, batch_policies, cfg.board_size
+            batch_states, batch_policies, batch_ownership = apply_random_symmetries(
+                batch_states, batch_policies, cfg.board_size, batch_ownership
             )
 
         with autocast_ctx:
-            logits, soft_logits, predicted_values = model(batch_states)
+            logits, soft_logits, predicted_values, ownership_pred = model(batch_states)
         logits = logits.float()
         predicted_values = predicted_values.float()
         if not torch.isfinite(logits).all():
@@ -1266,6 +1300,17 @@ def train_epoch(
         policy_kl = parts.policy_kl
         target_entropy = parts.target_entropy
         pred_entropy = parts.pred_entropy
+
+        # KataGo ownership auxiliary loss: dense per-cell MSE against the final
+        # board (current-player perspective). Only when enabled and the batch
+        # carries ownership targets.
+        if (
+            batch_ownership is not None
+            and ownership_pred is not None
+            and cfg.ownership_loss_weight > 0
+        ):
+            ownership_loss = F.mse_loss(ownership_pred.float(), batch_ownership)
+            loss = loss + cfg.ownership_loss_weight * ownership_loss
 
         if (not torch.isfinite(loss)) or loss.item() > cfg.max_loss:
             totals.skipped += 1
@@ -1899,7 +1944,7 @@ def run_training(cfg: TrainConfig) -> None:
             )
         else:
             train_dataset, train_weights = replay_to_dataset(
-                replay, kl_buffer if cfg.surprise_weighting else None
+                replay, kl_buffer if cfg.surprise_weighting else None, cfg.use_ownership
             )
             train_steps_to_run = effective_train_steps(cfg, len(train_dataset))
             if train_steps_to_run != cfg.train_steps_per_iteration:

@@ -56,8 +56,9 @@ class ResidualBlock(nn.Module):
 class PolicyValueNet(nn.Module):
     """Residual policy/value network for 10x10 Gomoku.
 
-    No hand-coded patterns. forward() always returns (policy_logits, soft_logits, value)
-    where soft_logits is None when use_soft_policy=False.
+    No hand-coded patterns. forward() always returns
+    (policy_logits, soft_logits, value, ownership) where soft_logits is None when
+    use_soft_policy=False and ownership is None when use_ownership=False.
     """
 
     def __init__(
@@ -73,11 +74,13 @@ class PolicyValueNet(nn.Module):
         se_ratio: int = 16,
         use_global_pool: bool = False,
         use_soft_policy: bool = False,
+        use_ownership: bool = False,
     ) -> None:
         super().__init__()
         self.board_size = board_size
         self.action_size = board_size * board_size
         self.use_soft_policy = use_soft_policy
+        self.use_ownership = use_ownership
 
         self.stem = nn.Sequential(
             nn.Conv2d(input_channels, channels, kernel_size=3, padding=1, bias=False),
@@ -115,6 +118,18 @@ class PolicyValueNet(nn.Module):
             nn.Linear(value_hidden, 1),
         )
 
+        # KataGo ownership head: per-cell prediction of who ends up owning each
+        # point (tanh in [-1, 1]: +1 = current player, -1 = opponent, 0 = empty).
+        # Dense supervision that regularises the shared tower.
+        self.ownership_head: nn.Module | None = (
+            nn.Sequential(
+                nn.Conv2d(channels, 1, kernel_size=1),
+                nn.Flatten(),
+            )
+            if use_ownership
+            else None
+        )
+
         nn.init.normal_(self.policy_head[-1].weight, mean=0.0, std=1.0e-3)
         nn.init.zeros_(self.policy_head[-1].bias)
         nn.init.normal_(self.value_head[-1].weight, mean=0.0, std=1.0e-3)
@@ -125,13 +140,16 @@ class PolicyValueNet(nn.Module):
 
     def forward(
         self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor, torch.Tensor | None]:
         x = self.stem(x)
         x = self.residual_tower(x)
         policy_logits = self.policy_head(x)
         soft_logits = self.soft_policy_head(x) if self.soft_policy_head is not None else None
         value = torch.tanh(self.value_head(self.value_conv(x)).squeeze(-1).float()).clamp(-1.0, 1.0)
-        return policy_logits, soft_logits, value
+        ownership = None
+        if self.ownership_head is not None:
+            ownership = torch.tanh(self.ownership_head(x).float()).clamp(-1.0, 1.0)
+        return policy_logits, soft_logits, value, ownership
 
 
 def model_kwargs_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -146,6 +164,7 @@ def model_kwargs_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
         "se_ratio": int(cfg.get("se_ratio", 16)),
         "use_global_pool": bool(cfg.get("use_global_pool", False)),
         "use_soft_policy": bool(cfg.get("use_soft_policy", False)),
+        "use_ownership": bool(cfg.get("use_ownership", False)),
     }
 
 
