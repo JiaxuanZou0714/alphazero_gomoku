@@ -397,15 +397,18 @@ PRESETS: dict[str, dict[str, object]] = {
     # head starts fresh. The EMA snapshot is what gets gated/promoted, so the
     # saved best only advances when it actually beats the v3 champion.
     "v4-student-3080": {
-        "iterations": 36,
+        "iterations": 100,
         "games_per_iteration": 64,
         "simulations": 224,
         "mcts_batch_size": 32,
         "epochs": 2,
         "train_steps_per_iteration": 80,
-        "batch_size": 1536,
+        "batch_size": 1024,
         "replay_size": 60_000,
-        "min_replay_size": 12_000,
+        # The warm-started v3 plays short decisive games (~16 plies), so each
+        # iteration only adds ~1k positions; start training after ~4 iterations
+        # of fill instead of stalling for a dozen self-play-only rounds.
+        "min_replay_size": 4_000,
         "max_train_replay_passes": 2.0,
         "learning_rate": 3.0e-5,      # gentle finetune of an already-converged net
         "min_learning_rate": 5.0e-6,
@@ -436,6 +439,8 @@ PRESETS: dict[str, dict[str, object]] = {
         "metrics_path": "alphazero_gomoku/outputs/metrics/v4-student-3080.jsonl",
         "resume": "alphazero_gomoku/outputs/checkpoints/v3-student-local/gomoku10_best.pt",
         "resume_allow_partial": True,
+        # 3 was measured fastest: the single 3080 serialises more workers' kernels,
+        # so 6 workers ran self-play ~2x slower (GPU contention + spawn overhead).
         "self_play_workers": 3,
         "self_play_devices": "auto",
         "eval_interval": 4,
@@ -448,7 +453,10 @@ PRESETS: dict[str, dict[str, object]] = {
         "eval_early_cutoff": True,
         "promotion_threshold": 0.55,
         "gate_evaluation": True,
-        "early_stop_evals": 4,
+        # Warm-start begins EQUAL to v3, so the first evals sit near 0.5 until the
+        # continued training pulls ahead; allow a long stagnation window (32 iters)
+        # before giving up rather than aborting before v4 can improve.
+        "early_stop_evals": 8,
         **_KATAGO_DEFAULTS,
     },
     "a100-4": {
@@ -2259,6 +2267,13 @@ def run_training(cfg: TrainConfig) -> None:
             break
 
     save_replay(replay, kl_buffer, cfg.replay_path)
+    # Always leave a final weights-only checkpoint (the EMA snapshot when EMA is
+    # on, else the raw model) so a run still yields a usable artifact even if it
+    # never cleared the promotion gate — e.g. a warm-start that stays near parity.
+    final_model = ema_model if ema_model is not None else base_model
+    final_path = Path(cfg.checkpoint_dir) / "gomoku10_final.pt"
+    save_model_checkpoint(final_model, cfg, iteration, final_path)
+    print(f"final_checkpoint_saved path={final_path} iteration={iteration}", flush=True)
 
 
 def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
