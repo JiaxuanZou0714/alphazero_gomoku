@@ -99,18 +99,22 @@ def main() -> None:
                 "or pass --model-id to derive docs/assets/models/<model-id>."
             )
         out_dir = Path("docs/assets/models") / args.model_id
+    # Effective model id: explicit --model-id, else derived from the target dir
+    # name. This keeps the overwrite guard live even when --out-dir is given
+    # without --model-id, and avoids writing a null "id" into the manifest.
+    model_id = args.model_id or out_dir.name
     # Guard against silently overwriting a different model's chunks.
     existing_manifest = out_dir / "manifest.json"
-    if existing_manifest.exists() and args.model_id:
+    if existing_manifest.exists():
         try:
             prior = json.loads(existing_manifest.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             prior = {}
         prior_id = prior.get("id")
-        if prior_id and prior_id != args.model_id:
+        if prior_id and prior_id != model_id:
             parser.error(
                 f"refusing to overwrite existing model '{prior_id}' in {out_dir} "
-                f"with model-id '{args.model_id}'. Choose a dedicated --out-dir."
+                f"with model-id '{model_id}'. Choose a dedicated --out-dir."
             )
     out_dir.mkdir(parents=True, exist_ok=True)
     onnx_path = out_dir / "gomoku10_best.onnx"
@@ -143,8 +147,8 @@ def main() -> None:
     chunks = split_file(onnx_path, out_dir, chunk_size)
     manifest = {
         "format": "onnx",
-        "id": args.model_id,
-        "label": args.model_label,
+        "id": model_id,
+        "label": args.model_label or model_id,
         "model": onnx_path.name,
         "storage": "chunks",
         "bytes": onnx_path.stat().st_size,

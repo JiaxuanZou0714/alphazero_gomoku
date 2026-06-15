@@ -1,3 +1,0 @@
-[console_scripts]
-gomoku-play = alphazero_gomoku.play:main
-gomoku-train = alphazero_gomoku.train:main

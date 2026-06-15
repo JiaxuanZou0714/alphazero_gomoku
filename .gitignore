@@ -7,6 +7,12 @@ __pycache__/
 .venv/
 venv/
 
+# Python packaging / build artifacts (pip install -e . generates the egg-info)
+*.egg-info/
+build/
+dist/
+.eggs/
+
 # Large training artifacts. The curated baseline checkpoint is force-added to
 # Git LFS (see .gitattributes); this rule only keeps *new* run outputs from
 # being committed by accident.
