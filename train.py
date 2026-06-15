@@ -107,6 +107,13 @@ class TrainConfig:
     promotion_threshold: float = 0.55
     gate_evaluation: bool = False
     early_stop_evals: int = 0           # stop after N consecutive failed evaluations (0 = off)
+    # KataGo EMA: per-iteration exponential moving average of weights, evaluated
+    # and promoted instead of the raw weights (0 = off). Smooths SGD noise.
+    ema_decay: float = 0.0
+    # KataGo ownership auxiliary head: dense per-cell supervision (who ends up
+    # owning each point) regularises the shared tower (0 weight = off).
+    use_ownership: bool = False
+    ownership_loss_weight: float = 0.0
     metrics_path: str = ""
     checkpoint_dir: str = "outputs/checkpoints"
     resume: str = ""
@@ -1743,6 +1750,38 @@ def best_checkpoint_path(cfg: TrainConfig) -> Path:
     return Path(cfg.checkpoint_dir) / "gomoku10_best.pt"
 
 
+def update_ema_(ema_model: torch.nn.Module, model: torch.nn.Module, decay: float) -> None:
+    """In-place EMA update: ema = decay*ema + (1-decay)*model, over every tensor
+    in the state dict (params + BN running stats). Integer buffers (e.g.
+    num_batches_tracked) are copied rather than averaged."""
+    ema_sd = ema_model.state_dict()
+    src_sd = unwrap_model(model).state_dict()
+    for name, src in src_sd.items():
+        dst = ema_sd[name]
+        if dst.dtype.is_floating_point:
+            dst.mul_(decay).add_(src.detach(), alpha=1.0 - decay)
+        else:
+            dst.copy_(src)
+
+
+def save_model_checkpoint(
+    model: torch.nn.Module, cfg: TrainConfig, iteration: int, path: Path
+) -> None:
+    """Atomically write a weights-only checkpoint (no optimizer) for `model`."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp")
+    torch.save(
+        {
+            "model": unwrap_model(model).state_dict(),
+            "config": asdict(cfg),
+            "model_kwargs": architecture_from_config(cfg),
+            "iteration": iteration,
+        },
+        tmp,
+    )
+    tmp.replace(path)
+
+
 def _log_run_config(cfg: TrainConfig) -> None:
     """Print the self-play worker layout and the full hyperparameter banner."""
     print(
@@ -1812,6 +1851,9 @@ def run_training(cfg: TrainConfig) -> None:
     mcts_cfg = mcts_config_from_train(cfg, cfg.simulations, for_eval=False)
     scaler = make_grad_scaler(cfg.amp and cfg.device.startswith("cuda"), cfg.amp_dtype)
     champion = copy.deepcopy(base_model).to(cfg.device) if cfg.eval_interval and cfg.eval_games else None
+    # KataGo EMA: a moving average of weights that is evaluated/promoted instead
+    # of the raw model (opt-in via ema_decay; None = disabled = unchanged behavior).
+    ema_model = copy.deepcopy(base_model).to(cfg.device) if cfg.ema_decay > 0 else None
     if cfg.early_stop_evals > 0 and champion is None:
         print(
             "config_warning early_stop_disabled reason=evaluation_not_enabled "
@@ -1900,6 +1942,12 @@ def run_training(cfg: TrainConfig) -> None:
                     flush=True,
                 )
 
+        # Update the EMA snapshot from the freshly-trained weights, then evaluate
+        # and promote it (instead of the raw model) when EMA is enabled.
+        if ema_model is not None:
+            update_ema_(ema_model, base_model, cfg.ema_decay)
+        eval_model = ema_model if ema_model is not None else base_model
+
         eval_stats = {
             "win_rate": 1.0,
             "wins": 0.0,
@@ -1918,7 +1966,7 @@ def run_training(cfg: TrainConfig) -> None:
         stop_early = False
         if evaluated:
             eval_stats = evaluate_candidate(
-                base_model,
+                eval_model,
                 champion,
                 cfg,
                 rng=random.Random(cfg.seed + iteration * 7919),
@@ -1937,11 +1985,14 @@ def run_training(cfg: TrainConfig) -> None:
                 flush=True,
             )
             if promoted:
-                champion.load_state_dict(base_model.state_dict())
+                champion.load_state_dict(eval_model.state_dict())
                 failed_evals = 0
             else:
                 failed_evals += 1
-                if cfg.gate_evaluation:
+                # Revert the training model to the champion on a failed gate. With
+                # EMA on we keep training the raw model (reverting it to an averaged
+                # snapshot would distort SGD); only the EMA champion line is gated.
+                if cfg.gate_evaluation and ema_model is None:
                     base_model.load_state_dict(champion.state_dict())
                     print(f"eval_reverted iter={iteration} reason=below_threshold", flush=True)
             if cfg.early_stop_evals > 0 and failed_evals >= cfg.early_stop_evals:
@@ -1954,10 +2005,15 @@ def run_training(cfg: TrainConfig) -> None:
         update_best = (evaluated and promoted) if champion is not None else True
         if update_best:
             best_path = best_checkpoint_path(cfg)
-            best_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_best = best_path.with_name(f"{best_path.name}.tmp")
-            shutil.copyfile(checkpoint, tmp_best)
-            tmp_best.replace(best_path)
+            if ema_model is not None:
+                # best = the promoted EMA weights (the iter checkpoint stays the
+                # raw training/optimizer state for resume).
+                save_model_checkpoint(ema_model, cfg, iteration, best_path)
+            else:
+                best_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp_best = best_path.with_name(f"{best_path.name}.tmp")
+                shutil.copyfile(checkpoint, tmp_best)
+                tmp_best.replace(best_path)
         if cfg.replay_path and cfg.replay_save_interval > 0 and iteration % cfg.replay_save_interval == 0:
             save_replay(replay, kl_buffer, cfg.replay_path)
 
@@ -2158,12 +2214,17 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
         choices=["bf16", "fp16", "none"],
         default=defaults.mcts_amp_dtype,
     )
+    parser.add_argument("--ema-decay", type=float, default=defaults.ema_decay)
+    parser.add_argument("--ownership-loss-weight", type=float, default=defaults.ownership_loss_weight)
+    parser.add_argument("--use-ownership", dest="use_ownership", action="store_true")
+    parser.add_argument("--no-use-ownership", dest="use_ownership", action="store_false")
     parser.set_defaults(
         data_parallel=defaults.data_parallel,
         augment_symmetries=defaults.augment_symmetries,
         use_se=defaults.use_se,
         use_global_pool=defaults.use_global_pool,
         use_soft_policy=defaults.use_soft_policy,
+        use_ownership=defaults.use_ownership,
         surprise_weighting=defaults.surprise_weighting,
         mcts_shaped_dirichlet=defaults.mcts_shaped_dirichlet,
         mcts_dynamic_cpuct=defaults.mcts_dynamic_cpuct,
