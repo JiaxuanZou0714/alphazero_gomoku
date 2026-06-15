@@ -16,9 +16,9 @@
 - 状态：`baseline`
 - 目标：建立当前最强的已验证基线模型。
 - 起点/产物：`outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt`
-- 关键改动：完整 A100 训练；使用较大的 `192x12` 网络；引入 global context、soft policy head、MCTS value target、dynamic cPUCT、FPU、forced playouts、playout cap randomization 等 KataGo-style 改进。
+- 关键改动：A100 训练 `100` 轮，中间 resume 两次；使用较大的 `192x12` 网络；引入 global context、soft policy head、MCTS value target、dynamic cPUCT、FPU、forced playouts、playout cap randomization 等 KataGo-style 改进。
 - 结果：成为后续所有实验的默认比较对象。
-- 结论：继续作为正式 baseline，除非新模型通过足够大的 head-to-head 评估。
+- 结论：继续作为正式 baseline，除非新模型通过足够大的 head-to-head 评估。目录名 `a100-4-prod-v3` 是历史命名，不代表它属于 v3。
 
 ## v2
 

@@ -12,7 +12,7 @@
 outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt
 ```
 
-该模型约 `115 MB`，不随 GitHub 仓库分发，需要作为本地或远端训练产物保存。
+该模型约 `115 MB`，不随 GitHub 仓库分发，需要作为本地或远端训练产物保存。`a100-4-prod-v3` 是历史目录名；按实验语义它是 `v1 / old best`，不是 v3。
 
 当前主线实验：
 
@@ -20,7 +20,7 @@ outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt
 v3-student-local
 ```
 
-v3 从蒸馏得到的 `128x8` student 出发，再做大规模 self-play RL。最新 A100 训练后，通过内部 gate 的 best 是：
+真正的 v3 从蒸馏得到的 `128x8` student 出发，再做大规模 self-play RL。最新 A100 训练后，通过内部 gate 的 best 是：
 
 ```text
 outputs/checkpoints/v3-student-local/gomoku10_best.pt
