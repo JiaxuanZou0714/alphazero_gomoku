@@ -397,7 +397,7 @@ PRESETS: dict[str, dict[str, object]] = {
     # head starts fresh. The EMA snapshot is what gets gated/promoted, so the
     # saved best only advances when it actually beats the v3 champion.
     "v4-student-3080": {
-        "iterations": 100,
+        "iterations": 80,
         "games_per_iteration": 64,
         "simulations": 224,
         "mcts_batch_size": 32,
@@ -443,9 +443,12 @@ PRESETS: dict[str, dict[str, object]] = {
         # so 6 workers ran self-play ~2x slower (GPU contention + spawn overhead).
         "self_play_workers": 3,
         "self_play_devices": "auto",
-        "eval_interval": 4,
-        "eval_games": 24,
-        "eval_simulations": 224,
+        # Eval is a relative gate, not a strength measurement: a full 224-sim,
+        # 24-game eval cost ~8 min/round (3x the self-play). 16 games at 128 sims
+        # every 5 iters keeps the signal while cutting eval to ~3 min/round.
+        "eval_interval": 5,
+        "eval_games": 16,
+        "eval_simulations": 128,
         "eval_opening_moves": 4,
         "eval_progress_interval": 1,
         "eval_workers": 3,
