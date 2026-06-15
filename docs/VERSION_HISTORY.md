@@ -44,7 +44,7 @@
 - 目标：用 old best 蒸馏一个更轻的 student，降低后续 RL 成本。
 - 起点/产物：`outputs/checkpoints/distill-oldbest-128x8/gomoku10_student_best.pt`
 - 关键改动：student 使用 `128` channels、`8` residual blocks、`12` policy channels、`6` value channels、`384` value hidden，并保留 global pooling 和 soft policy head。
-- 结果：通过最低准入 benchmark，作为 v3 student RL 的起点。
+- 结果：前 `24` 步 raw distill，后 `16` 步 MCTS fine-tune；末尾 `policy_top1 ~= 0.712`、`policy_kl ~= 0.509`、`value_mae ~= 0.120`。通过最低准入 benchmark，作为 v3 student RL 的起点。
 - 结论：保留为当前 student 主线的 seed。
 
 ## v3-student-local
@@ -53,8 +53,8 @@
 - 目标：让轻量 student 进入大规模 KataGo-style RL，尝试超过 old best。
 - 起点/产物：`--preset v3-student-local`、`outputs/checkpoints/v3-student-local/`、`outputs/metrics/v3-student-local.jsonl`
 - 关键改动：从 `distill-oldbest-128x8` 启动；每轮 `96` 盘 self-play；replay 达到 `25k` 原始局面后开始训练；每轮最多扫 replay `2` 遍；每 5 轮做 champion gate eval。
-- 结果：基础设施优化后训练流程健康；棋力仍需最终对 old best 做大样本验证。
-- 结论：当前主线，尚未替代 old best。
+- 结果：基础设施优化后训练流程健康；`gomoku10_best.pt` 对应第 `90` 轮。对 v1 / old best 的 `128 sims` 复核为 `54-10-0`，score `0.84375`。
+- 结论：当前主线，已在 `128 sims` 设置下明显超过 old best；正式替代前仍建议补更高 sims 和更大样本评估。
 
 ## v3-infra-20260615
 

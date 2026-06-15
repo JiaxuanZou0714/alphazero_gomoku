@@ -28,16 +28,18 @@ outputs/checkpoints/v3-student-local/gomoku10_best.pt
 
 注意：这个 best 对应第 `90` 轮，不是最后保存的 `iter_0096.pt`。
 
-快速对 old best 初筛：
+最新对 old best 复核：
 
 ```text
 v3_best_iter90 vs old_best
-128 sims, 16 games
-14 胜 / 2 负 / 0 和
-score = 0.875
+128 sims, 64 games
+54 胜 / 10 负 / 0 和
+score = 0.84375
+执黑：31 胜 / 1 负
+执白：23 胜 / 9 负
 ```
 
-这个结果说明 v3 有希望超过 old best，但正式晋升仍需要更大样本 head-to-head 评估。
+这个结果说明 v3 已经明显强于 v1 / old best 的 `128 sims` 设置；正式晋升仍建议继续补更高 sims 和更大样本评估。
 
 ## 项目结构
 
@@ -54,41 +56,65 @@ tests/       单元测试
 outputs/     本地训练产物、metrics、plots
 ```
 
-## 最新 v3 曲线
+## 训练曲线
 
-数据来源：
+### v1 / old best
+
+```text
+outputs/metrics/a100-4-prod-v3.jsonl
+```
+
+`a100-4-prod-v3` 是历史目录名，实际语义是 v1 / old best。它训练 `100` 轮，中间 resume 两次。
+
+![v1 training overview](outputs/plots/a100-4-prod-v3/metrics_overview.png)
+
+更多 v1 图：
+
+```text
+outputs/plots/a100-4-prod-v3/losses.png
+outputs/plots/a100-4-prod-v3/accuracy_value.png
+outputs/plots/a100-4-prod-v3/entropy.png
+outputs/plots/a100-4-prod-v3/selfplay_outcomes.png
+outputs/plots/a100-4-prod-v3/data_timing_eval.png
+```
+
+### distill / 128x8 student
+
+```text
+outputs/metrics/distill-oldbest-128x8.jsonl
+```
+
+蒸馏分两段：前 `24` 步是 raw distill，后 `16` 步是 MCTS fine-tune。
+
+![distill overview](outputs/plots/distill-oldbest-128x8/metrics_overview.png)
+
+更多蒸馏图：
+
+```text
+outputs/plots/distill-oldbest-128x8/losses.png
+outputs/plots/distill-oldbest-128x8/policy_value.png
+outputs/plots/distill-oldbest-128x8/policy_kl.png
+outputs/plots/distill-oldbest-128x8/metrics.csv
+```
+
+蒸馏末尾：`policy_top1 ~= 0.712`，`policy_kl ~= 0.509`，`value_mae ~= 0.120`。
+
+### v3 / student RL
 
 ```text
 outputs/metrics/v3-student-a100-final.jsonl
 ```
 
-总览：
-
 ![v3 training overview](outputs/plots/v3-student-a100-final/metrics_overview.png)
 
-损失：
-
-![v3 losses](outputs/plots/v3-student-a100-final/losses.png)
-
-策略和值网络：
-
-![v3 policy value](outputs/plots/v3-student-a100-final/policy_value.png)
-
-KL 和熵：
-
-![v3 entropy kl](outputs/plots/v3-student-a100-final/entropy_kl.png)
-
-自我对弈胜率：
-
-![v3 self-play outcomes](outputs/plots/v3-student-a100-final/selfplay_outcomes.png)
-
-耗时和 replay：
-
-![v3 timing replay](outputs/plots/v3-student-a100-final/timing_replay.png)
-
-CSV：
+更多 v3 图：
 
 ```text
+outputs/plots/v3-student-a100-final/losses.png
+outputs/plots/v3-student-a100-final/policy_value.png
+outputs/plots/v3-student-a100-final/entropy_kl.png
+outputs/plots/v3-student-a100-final/selfplay_outcomes.png
+outputs/plots/v3-student-a100-final/timing_replay.png
 outputs/plots/v3-student-a100-final/metrics.csv
 ```
 
