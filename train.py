@@ -564,7 +564,7 @@ def preset_config(name: str) -> TrainConfig:
 
 def split_devices(device_spec: str, fallback_device: str) -> list[str]:
     if device_spec == "auto":
-        if torch.cuda.is_available():
+        if fallback_device.startswith("cuda") and torch.cuda.is_available():
             return [f"cuda:{index}" for index in range(torch.cuda.device_count())]
         return [fallback_device]
     devices = [device.strip() for device in device_spec.split(",") if device.strip()]
@@ -981,57 +981,59 @@ def collect_self_play_examples(
         executor_context = concurrent.futures.ProcessPoolExecutor(
             max_workers=len(jobs), mp_context=context
         )
-    with executor_context as executor:
-        futures = [
-            executor.submit(
-                play_self_games_worker,
-                cfg_data,
-                mcts_data,
-                model_state_path,
-                games,
-                device,
-                worker_id,
-                iteration,
-            )
-            for worker_id, device, games in jobs
-        ]
-        pending = set(futures)
-        while pending:
-            now = time.monotonic()
-            if now - last_heartbeat >= 30:
-                elapsed = now - start
-                if done_games:
-                    avg = elapsed / done_games
-                    eta_text = format_duration(avg * (total_games - done_games))
-                else:
-                    eta_text = "warming_up"
-                print(
-                    f"selfplay_wait iter={iteration} games={done_games}/"
-                    f"{total_games} elapsed={format_duration(elapsed)} "
-                    f"eta={eta_text}",
-                    flush=True,
+    try:
+        with executor_context as executor:
+            futures = [
+                executor.submit(
+                    play_self_games_worker,
+                    cfg_data,
+                    mcts_data,
+                    model_state_path,
+                    games,
+                    device,
+                    worker_id,
+                    iteration,
                 )
-                last_heartbeat = now
+                for worker_id, device, games in jobs
+            ]
+            pending = set(futures)
+            while pending:
+                now = time.monotonic()
+                if now - last_heartbeat >= 30:
+                    elapsed = now - start
+                    if done_games:
+                        avg = elapsed / done_games
+                        eta_text = format_duration(avg * (total_games - done_games))
+                    else:
+                        eta_text = "warming_up"
+                    print(
+                        f"selfplay_wait iter={iteration} games={done_games}/"
+                        f"{total_games} elapsed={format_duration(elapsed)} "
+                        f"eta={eta_text}",
+                        flush=True,
+                    )
+                    last_heartbeat = now
 
-            done, pending = concurrent.futures.wait(
-                pending,
-                timeout=0,
-                return_when=concurrent.futures.FIRST_COMPLETED,
-            )
-            for future in done:
-                examples, kl_surprises, lengths, stats, device = future.result()
-                all_examples.extend(examples)
-                all_kl_surprises.extend(kl_surprises)
-                all_lengths.extend(lengths)
-                all_stats.append(stats)
-                done_games += len(lengths)
-                print(
-                    f"selfplay_worker_done iter={iteration} device={device} "
-                    f"games={done_games}/{total_games} worker_games={len(lengths)} "
-                    f"examples={len(examples)} policy_entropy={stats['policy_entropy']:.3f}",
-                    flush=True,
+                done, pending = concurrent.futures.wait(
+                    pending,
+                    timeout=0,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
                 )
-    shutil.rmtree(snapshot_dir, ignore_errors=True)
+                for future in done:
+                    examples, kl_surprises, lengths, stats, device = future.result()
+                    all_examples.extend(examples)
+                    all_kl_surprises.extend(kl_surprises)
+                    all_lengths.extend(lengths)
+                    all_stats.append(stats)
+                    done_games += len(lengths)
+                    print(
+                        f"selfplay_worker_done iter={iteration} device={device} "
+                        f"games={done_games}/{total_games} worker_games={len(lengths)} "
+                        f"examples={len(examples)} policy_entropy={stats['policy_entropy']:.3f}",
+                        flush=True,
+                    )
+    finally:
+        shutil.rmtree(snapshot_dir, ignore_errors=True)
     return all_examples, all_kl_surprises, all_lengths, merge_stats(all_stats)
 
 
@@ -1497,77 +1499,79 @@ def evaluate_candidate(
             executor_context = concurrent.futures.ProcessPoolExecutor(
                 max_workers=worker_count, mp_context=context
             )
-        with executor_context as executor:
-            futures = [
-                executor.submit(
-                    play_eval_game_worker,
-                    cfg_data,
-                    candidate_state_path,
-                    baseline_state_path,
-                    jobs,
-                    worker_devices[worker_id],
-                    iteration or 0,
-                )
-                for worker_id, jobs in enumerate(game_jobs)
-                if jobs
-            ]
-            pending = set(futures)
-            while pending:
-                done, pending = concurrent.futures.wait(
-                    pending,
-                    timeout=30,
-                    return_when=concurrent.futures.FIRST_COMPLETED,
-                )
-                if not done:
-                    print(
-                        f"eval_wait{iter_label} games={played}/{cfg.eval_games} "
-                        f"elapsed={format_duration(time.monotonic() - eval_start)}",
-                        flush=True,
+        try:
+            with executor_context as executor:
+                futures = [
+                    executor.submit(
+                        play_eval_game_worker,
+                        cfg_data,
+                        candidate_state_path,
+                        baseline_state_path,
+                        jobs,
+                        worker_devices[worker_id],
+                        iteration or 0,
                     )
-                    continue
-                for future in done:
-                    for result in future.result():
-                        outcome = str(result["outcome"])
-                        if outcome == "draw":
-                            draws += 1
-                        elif outcome == "candidate":
-                            wins += 1
-                        else:
-                            losses += 1
-                        played += 1
-                        score = wins + 0.5 * draws
-                        candidate_player = int(result["candidate_player"])
-                        if cfg.eval_progress_interval > 0 and (
-                            played % cfg.eval_progress_interval == 0
-                            or played == cfg.eval_games
-                        ):
-                            print(
-                                f"eval_game{iter_label} game={played}/{cfg.eval_games} "
-                                f"source_game={int(result['game_index']) + 1} "
-                                f"device={result['device']} "
-                                f"candidate_color={'black' if candidate_player == 1 else 'white'} "
-                                f"outcome={outcome} moves={int(result['moves'])} "
-                                f"score={score / max(1, cfg.eval_games):.3f} "
-                                f"wins={wins} losses={losses} draws={draws} "
-                                f"elapsed={format_duration(time.monotonic() - eval_start)}",
-                                flush=True,
-                            )
-        win_rate = (wins + 0.5 * draws) / max(1, cfg.eval_games)
-        print(
-            f"eval_done{iter_label} played={played}/{cfg.eval_games} "
-            f"score={win_rate:.3f} wins={wins} losses={losses} draws={draws} "
-            f"early_cutoff=False elapsed={format_duration(time.monotonic() - eval_start)}",
-            flush=True,
-        )
-        shutil.rmtree(snapshot_dir, ignore_errors=True)
-        return {
-            "win_rate": float(win_rate),
-            "wins": float(wins),
-            "losses": float(losses),
-            "draws": float(draws),
-            "games": float(played),
-            "early_cutoff": 0.0,
-        }
+                    for worker_id, jobs in enumerate(game_jobs)
+                    if jobs
+                ]
+                pending = set(futures)
+                while pending:
+                    done, pending = concurrent.futures.wait(
+                        pending,
+                        timeout=30,
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
+                    if not done:
+                        print(
+                            f"eval_wait{iter_label} games={played}/{cfg.eval_games} "
+                            f"elapsed={format_duration(time.monotonic() - eval_start)}",
+                            flush=True,
+                        )
+                        continue
+                    for future in done:
+                        for result in future.result():
+                            outcome = str(result["outcome"])
+                            if outcome == "draw":
+                                draws += 1
+                            elif outcome == "candidate":
+                                wins += 1
+                            else:
+                                losses += 1
+                            played += 1
+                            score = wins + 0.5 * draws
+                            candidate_player = int(result["candidate_player"])
+                            if cfg.eval_progress_interval > 0 and (
+                                played % cfg.eval_progress_interval == 0
+                                or played == cfg.eval_games
+                            ):
+                                print(
+                                    f"eval_game{iter_label} game={played}/{cfg.eval_games} "
+                                    f"source_game={int(result['game_index']) + 1} "
+                                    f"device={result['device']} "
+                                    f"candidate_color={'black' if candidate_player == 1 else 'white'} "
+                                    f"outcome={outcome} moves={int(result['moves'])} "
+                                    f"score={score / max(1, cfg.eval_games):.3f} "
+                                    f"wins={wins} losses={losses} draws={draws} "
+                                    f"elapsed={format_duration(time.monotonic() - eval_start)}",
+                                    flush=True,
+                                )
+            win_rate = (wins + 0.5 * draws) / max(1, cfg.eval_games)
+            print(
+                f"eval_done{iter_label} played={played}/{cfg.eval_games} "
+                f"score={win_rate:.3f} wins={wins} losses={losses} draws={draws} "
+                f"early_cutoff=False elapsed={format_duration(time.monotonic() - eval_start)}",
+                flush=True,
+            )
+            return {
+                "win_rate": float(win_rate),
+                "wins": float(wins),
+                "losses": float(losses),
+                "draws": float(draws),
+                "games": float(played),
+                "early_cutoff": 0.0,
+            }
+        finally:
+            shutil.rmtree(snapshot_dir, ignore_errors=True)
 
     wins = losses = draws = 0
     played = 0
