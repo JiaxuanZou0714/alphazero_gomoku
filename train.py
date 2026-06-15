@@ -968,7 +968,10 @@ def collect_self_play_examples(
     done_games = 0
     start = time.monotonic()
     last_heartbeat = start
-    with tempfile.TemporaryDirectory(prefix="az_selfplay_") as temp_dir, context.Manager() as manager:
+    with tempfile.TemporaryDirectory(
+        prefix="az_selfplay_",
+        ignore_cleanup_errors=True,
+    ) as temp_dir, context.Manager() as manager:
         model_state_path = str(Path(temp_dir) / f"iter_{iteration:04d}_model.pt")
         torch.save(cpu_state_dict(model), model_state_path)
         progress_queue = manager.Queue()
