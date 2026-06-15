@@ -951,6 +951,12 @@ dd {
   text-wrap: pretty;
 }
 
+.source a {
+  color: var(--accent-2);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -1413,12 +1419,63 @@ ol {
   padding-right: 4px;
 }
 
+.version-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.version-list li {
+  align-items: center;
+  border: 1px solid rgba(213, 222, 212, 0.82);
+  border-radius: 6px;
+  background: rgba(244, 247, 242, 0.58);
+  padding: 8px 9px;
+}
+
+.version-list div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.version-list strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.version-list span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.version-list em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(35, 111, 120, 0.1);
+  color: var(--accent-2);
+  padding: 3px 7px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 760;
+  line-height: 1.2;
+}
+
 li {
   display: flex;
   justify-content: space-between;
   gap: 10px;
   border-bottom: 1px solid rgba(211, 218, 203, 0.78);
   padding-bottom: 6px;
+}
+
+.version-list li {
+  border-bottom: 1px solid rgba(213, 222, 212, 0.82);
+  padding-bottom: 8px;
 }
 
 .move-source {
