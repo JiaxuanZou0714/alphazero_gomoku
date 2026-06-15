@@ -20,8 +20,7 @@ model.py       Policy-Value 网络（含全局池化、辅助软策略头）
 train.py       自我对弈、训练、评估和 checkpoint 保存
 utils.py       公共工具（resolve_device, load_model）
 play.py        命令行人机对弈
-web_play.py    本地网页对弈服务
-web/           前端棋盘界面
+docs/          GitHub Pages 静态网页对弈界面
 tests/         单元测试（规则、MCTS、训练组件）
 outputs/       checkpoint、metrics、plots
 ```
@@ -353,24 +352,6 @@ python alphazero_gomoku/scripts/benchmark_checkpoints.py \
 Do not use loss curves alone to promote a checkpoint. The promotion signal is
 paired-opening head-to-head score against the current champion.
 
-## 本地网页对弈
-
-```bash
-cd /Users/jiaxuanzou/Documents
-
-python -m alphazero_gomoku.web_play \
-  alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt \
-  --simulations 256
-```
-
-然后打开：
-
-```text
-http://127.0.0.1:8765
-```
-
-界面支持悔棋（Undo）和局面分析（Analyze）。
-
 ## 训练曲线
 
 下面的图来自 v3 完整训练的 `outputs/metrics/a100-4-prod-v3.jsonl`（100 轮，4×A100，总耗时约 `13.2` 小时）。所有图中的两条虚线是两次训练中干预：
@@ -458,4 +439,4 @@ conda run -n alphazero-gomoku python scripts\export_pages_model.py --checkpoint 
 conda run -n alphazero-gomoku python -m http.server 8780 --bind 127.0.0.1 --directory docs
 ```
 
-然后打开 <http://127.0.0.1:8780/>。部署到 GitHub Pages 时，在仓库 Settings -> Pages 里选择从分支发布，并把目录设为 `/docs`。静态版会从 `docs/assets/model/manifest.json` 读取模型分片，不需要 `web_play.py`、Python 服务或 GPU 后端。
+然后打开 <http://127.0.0.1:8780/>。部署到 GitHub Pages 时，在仓库 Settings -> Pages 里选择从分支发布，并把目录设为 `/docs`。静态版会从 `docs/assets/model/manifest.json` 读取模型分片，不需要 Python 服务或 GPU 后端。
