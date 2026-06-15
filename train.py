@@ -364,11 +364,11 @@ def preset_config(name: str) -> TrainConfig:
         cfg.temperature_moves = 12
         cfg.mcts_c_puct = 1.25
         cfg.mcts_dirichlet_alpha = 0.15
-        cfg.channels = 96
-        cfg.residual_blocks = 6
-        cfg.policy_channels = 8
-        cfg.value_channels = 4
-        cfg.value_hidden = 256
+        cfg.channels = 128
+        cfg.residual_blocks = 8
+        cfg.policy_channels = 12
+        cfg.value_channels = 6
+        cfg.value_hidden = 384
         cfg.use_global_pool = True
         cfg.use_soft_policy = True
         cfg.soft_policy_loss_weight = 2.0
@@ -387,7 +387,7 @@ def preset_config(name: str) -> TrainConfig:
         cfg.replay_path = "alphazero_gomoku/outputs/replay/v3-student-local_replay.pt"
         cfg.replay_save_interval = 2
         cfg.metrics_path = "alphazero_gomoku/outputs/metrics/v3-student-local.jsonl"
-        cfg.resume = "alphazero_gomoku/outputs/checkpoints/distill-oldbest-light/gomoku10_student_best.pt"
+        cfg.resume = "alphazero_gomoku/outputs/checkpoints/distill-oldbest-128x8/gomoku10_student_best.pt"
         cfg.self_play_workers = 4
         cfg.self_play_devices = "auto"
         cfg.eval_interval = 5

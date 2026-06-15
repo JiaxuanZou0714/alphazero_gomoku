@@ -385,12 +385,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint-dir",
         type=Path,
-        default=default_path("outputs", "checkpoints", "distill-oldbest-light"),
+        default=default_path("outputs", "checkpoints", "distill-oldbest-128x8"),
     )
     parser.add_argument(
         "--metrics-path",
         type=Path,
-        default=default_path("outputs", "metrics", "distill-oldbest-light.jsonl"),
+        default=default_path("outputs", "metrics", "distill-oldbest-128x8.jsonl"),
     )
     parser.add_argument("--device", default="auto")
     parser.add_argument("--student-resume", type=Path, default=None)
@@ -404,11 +404,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--move-temperature", type=float, default=1.0)
     parser.add_argument("--teacher-sims", type=int, default=0)
     parser.add_argument("--mcts-target-prob", type=float, default=0.0)
-    parser.add_argument("--channels", type=int, default=96)
-    parser.add_argument("--residual-blocks", type=int, default=6)
-    parser.add_argument("--policy-channels", type=int, default=8)
-    parser.add_argument("--value-channels", type=int, default=4)
-    parser.add_argument("--value-hidden", type=int, default=256)
+    parser.add_argument("--channels", type=int, default=128)
+    parser.add_argument("--residual-blocks", type=int, default=8)
+    parser.add_argument("--policy-channels", type=int, default=12)
+    parser.add_argument("--value-channels", type=int, default=6)
+    parser.add_argument("--value-hidden", type=int, default=384)
     parser.add_argument("--use-global-pool", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--use-soft-policy", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--epochs", type=int, default=24)

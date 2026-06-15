@@ -220,9 +220,9 @@ scripts\distill_old_best_light.cmd
 默认输出：
 
 ```text
-outputs/checkpoints/distill-oldbest-light/gomoku10_student_best.pt
-outputs/checkpoints/distill-oldbest-light/gomoku10_student_final.pt
-outputs/metrics/distill-oldbest-light.jsonl
+outputs/checkpoints/distill-oldbest-128x8/gomoku10_student_best.pt
+outputs/checkpoints/distill-oldbest-128x8/gomoku10_student_final.pt
+outputs/metrics/distill-oldbest-128x8.jsonl
 outputs/logs/distill_oldbest_light.out.log
 outputs/logs/distill_oldbest_light.err.log
 ```
@@ -237,12 +237,19 @@ scripts\distill_old_best_light.cmd --games 2 --epochs 1 --batch-size 32 --device
 
 ```bat
 scripts\distill_old_best_light.cmd ^
-  --student-resume outputs\checkpoints\distill-oldbest-light\gomoku10_student_best.pt ^
-  --games 256 ^
+  --student-resume outputs\checkpoints\distill-oldbest-128x8\gomoku10_student_best.pt ^
+  --checkpoint-dir outputs\checkpoints\distill-oldbest-128x8 ^
+  --metrics-path outputs\metrics\distill-oldbest-128x8.jsonl ^
+  --channels 128 ^
+  --residual-blocks 8 ^
+  --policy-channels 12 ^
+  --value-channels 6 ^
+  --value-hidden 384 ^
+  --games 512 ^
   --random-opening-moves 8 ^
   --teacher-sims 64 ^
   --mcts-target-prob 0.25 ^
-  --epochs 12 ^
+  --epochs 16 ^
   --batch-size 1024 ^
   --learning-rate 1e-4
 ```
@@ -253,20 +260,28 @@ scripts\distill_old_best_light.cmd ^
 python -m alphazero_gomoku.train --preset v3-student-local
 ```
 
-`v3-student-local` 使用 `96` channels、`6` 个 residual blocks、全局池化和软策略头，比 old best 的 `192x12` 更轻。RL 阶段仍保留 KataGo 风格的 root policy temperature、shaped Dirichlet、dynamic cPUCT、FPU、forced playouts、playout cap randomization、随机开局评估和 champion gate。它还会在 replay 低于 `25k` 原始局面时跳过训练，并把每轮训练步数限制为最多扫 replay `2` 遍，避免 v2 那种小 replay 反复拟合。
+也可以使用 Windows 启动脚本：
+
+```bat
+scripts\train_v3_student_local.cmd
+```
+
+`v3-student-local` 使用 `128` channels、`8` 个 residual blocks、全局池化和软策略头，比 old best 的 `192x12` 更轻。RL 阶段仍保留 KataGo 风格的 root policy temperature、shaped Dirichlet、dynamic cPUCT、FPU、forced playouts、playout cap randomization、随机开局评估和 champion gate。它还会在 replay 低于 `25k` 原始局面时跳过训练，并把每轮训练步数限制为最多扫 replay `2` 遍，避免 v2 那种小 replay 反复拟合。
 
 进入 RL 前至少跑一次：
 
 ```bash
 python alphazero_gomoku/scripts/benchmark_checkpoints.py \
-  --candidate alphazero_gomoku/outputs/checkpoints/distill-oldbest-light/gomoku10_student_best.pt \
+  --candidate alphazero_gomoku/outputs/checkpoints/distill-oldbest-128x8/gomoku10_student_best.pt \
   --baseline alphazero_gomoku/outputs/checkpoints/a100-4-prod-v3/gomoku10_best.pt \
-  --candidate-sims 128,256 \
+  --candidate-sims 256 \
   --baseline-sims 256 \
   --games 16
 ```
 
 如果这个 benchmark 低于约 `0.45`，继续蒸馏或调整 student 容量；不要启动 `v3-student-local`。
+
+当前 128x8 student 已通过准入预检：`256` sims 对 old best `256` sims，16 盘 `8-8`，score `0.50`。
 
 ## 使用本地 RTX 3080 启动旧 v3 预设
 
