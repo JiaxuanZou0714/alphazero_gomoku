@@ -8,6 +8,7 @@ import math
 import multiprocessing as mp
 import random
 import shutil
+import tempfile
 import time
 from collections import deque
 from dataclasses import asdict, dataclass
@@ -949,14 +950,9 @@ def collect_self_play_examples(
     done_games = 0
     start = time.monotonic()
     last_heartbeat = start
-    # On Windows, tempfile roots can be blocked by process-handle races. Store
-    # these small per-iteration snapshots next to regular checkpoints instead.
-    snapshot_dir = (
-        Path(cfg.checkpoint_dir)
-        / "_selfplay_tmp"
-        / f"iter_{iteration:04d}_{int(time.time() * 1000)}"
-    )
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    # Per-iteration model snapshot handed to spawned workers via a temp file
+    # (rmtree'd in the finally below).
+    snapshot_dir = Path(tempfile.mkdtemp(prefix=f"azg_selfplay_{iteration:04d}_"))
     model_state_path = str(snapshot_dir / "model.pt")
     torch.save(cpu_state_dict(model), model_state_path)
     # Process isolation (spawn) on every platform. Two reasons it must not be a
@@ -1559,12 +1555,7 @@ def evaluate_candidate(
                 next_game += 1
             game_jobs.append(jobs)
         worker_devices = [devices[index % len(devices)] for index in range(worker_count)]
-        snapshot_dir = (
-            Path(cfg.checkpoint_dir)
-            / "_eval_tmp"
-            / f"iter_{iteration or 0:04d}_{int(time.time() * 1000)}"
-        )
-        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_dir = Path(tempfile.mkdtemp(prefix=f"azg_eval_{iteration or 0:04d}_"))
         candidate_state_path = str(snapshot_dir / "candidate.pt")
         baseline_state_path = str(snapshot_dir / "baseline.pt")
         torch.save(cpu_state_dict(candidate), candidate_state_path)
