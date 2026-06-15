@@ -5,6 +5,7 @@ const statusPill = document.querySelector("#statusPill");
 const simSlider = document.querySelector("#simSlider");
 const simValue = document.querySelector("#simValue");
 const sideLabel = document.querySelector("#sideLabel");
+const modelLabel = document.querySelector("#modelLabel");
 const movesEl = document.querySelector("#moves");
 const turnEl = document.querySelector("#turn");
 const historyList = document.querySelector("#historyList");
@@ -49,11 +50,13 @@ const recommendationWhy = document.querySelector("#recommendationWhy");
 const analysisDetails = document.querySelector(".analysis-details");
 const networkDetails = document.querySelector(".network-details");
 const sideInputs = [...document.querySelectorAll("input[name='side']")];
+const modelInputs = [...document.querySelectorAll("input[name='model']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 
-const APP_VERSION = "2026-06-14-ui-lab-template";
+const APP_VERSION = "2026-06-15-multi-model";
 let state = null;
 let selectedSide = "white";
+let selectedModelId = "v3";
 let overlayMode = "none";
 let busy = true;
 let cells = [];
@@ -66,23 +69,31 @@ let d3TreePromise = null;
 let mermaidReady = false;
 let mermaidError = false;
 let mermaidPromise = null;
+let renderedNetworkKey = "";
 const pending = new Map();
 
 const worker = new Worker(`./engine.worker.js?v=${APP_VERSION}`);
 
 const SIMULATION_OPTIONS = [16, 32, 64, 128, 256, 512, 1024, 2048];
-const NETWORK_DIAGRAM = String.raw`
+function networkDiagramSource(model) {
+  const cfg = model && model.config ? model.config : {};
+  const channels = cfg.channels || 128;
+  const blocks = cfg.residual_blocks || 8;
+  const policyChannels = cfg.policy_channels || 12;
+  const valueHidden = cfg.value_hidden || 384;
+  return String.raw`
 flowchart LR
   input["棋盘输入<br/>黑 / 白两层"]
-  stem["卷积特征<br/>192 通道"]
-  tower["残差塔<br/>12 块"]
-  policy["落点倾向<br/>100 logits"]
-  value["局面评估<br/>1 value"]
+  stem["卷积特征<br/>${channels} 通道"]
+  tower["残差塔<br/>${blocks} 块"]
+  policy["落点倾向<br/>${policyChannels} 通道头"]
+  value["局面评估<br/>hidden ${valueHidden}"]
   mcts["MCTS<br/>反复搜索"]
   input --> stem --> tower
   tower --> policy --> mcts
   tower --> value --> mcts
 `;
+}
 const playerName = (v) => (v === 1 ? "黑" : v === -1 ? "白" : "-");
 const pct = (v, digits = 0) => `${(v * 100).toFixed(digits)}%`;
 const moveText = (move) => (move ? `${move.row + 1},${move.col + 1}` : "-");
@@ -127,6 +138,12 @@ function syncOverlayButtons() {
   overlayInputs.forEach((input) => {
     input.checked = input.value === overlayMode;
   });
+}
+
+function modelDisplayName(modelId = selectedModelId) {
+  if (state && state.model && state.model.id === modelId) return state.model.label || modelId;
+  const input = modelInputs.find((item) => item.value === modelId);
+  return input ? input.closest(".segment").querySelector("span").textContent : modelId;
 }
 
 function resetAnalysisView() {
@@ -203,7 +220,7 @@ function busyCopy(label) {
 
 function setBusy(nextBusy, label = "") {
   busy = nextBusy;
-  [newGameBtn, undoBtn, analyzeBtn, simSlider, ...sideInputs].forEach((el) => {
+  [newGameBtn, undoBtn, analyzeBtn, simSlider, ...sideInputs, ...modelInputs].forEach((el) => {
     el.disabled = busy;
   });
   newGameBtn.textContent = busy && label.includes("新对局") ? "开局中" : "新对局";
@@ -825,10 +842,46 @@ function render(nextState) {
   simSlider.value = simIndex;
   syncSimulationDisplay(SIMULATION_OPTIONS[simIndex]);
   sideLabel.textContent = state.humanPlayer === 1 ? "执黑" : "执白";
+  selectedModelId = state.model && state.model.id ? state.model.id : selectedModelId;
+  modelInputs.forEach((input) => {
+    input.checked = input.value === selectedModelId;
+  });
+  modelLabel.textContent = state.model && state.model.label ? state.model.label : modelDisplayName();
   statusPill.textContent = state.status;
   statusPill.className = `status-pill ${state.winner !== null ? "done" : ""}`;
   undoBtn.disabled = !state.canUndo || busy;
+  if (networkDetails.open) initNetworkDiagram();
   requestLiveEvaluation();
+}
+
+async function switchModel(modelId) {
+  if (busy || modelId === selectedModelId) return;
+  selectedModelId = modelId;
+  resetAnalysisView();
+  renderedNetworkKey = "";
+  if (networkDiagram) {
+    networkDiagram.textContent = "网络结构图加载中";
+    networkDiagram.classList.remove("is-rendered", "diagram-error");
+  }
+  try {
+    setBusy(true, `加载 ${modelDisplayName(modelId)}`);
+    loadLine.classList.remove("ready");
+    loadBar.style.transform = "scaleX(0.02)";
+    loadPercent.textContent = "0%";
+    loadText.textContent = "准备加载";
+    await callWorker("init", { modelId });
+    loadBar.style.transform = "scaleX(1)";
+    loadPercent.textContent = "100%";
+    loadText.textContent = `${modelDisplayName(modelId)} 就绪，正在开局`;
+    setBusy(false);
+    await newGame();
+    loadLine.classList.add("ready");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    setBusy(false);
+    if (state) render(state);
+  }
 }
 
 async function newGame() {
@@ -899,7 +952,10 @@ async function analyze() {
 }
 
 async function initNetworkDiagram() {
-  if (!networkDiagram || mermaidReady || mermaidError) return;
+  if (!networkDiagram || mermaidError) return;
+  const model = state && state.model ? state.model : null;
+  const key = model ? `${model.id}:${model.iteration || ""}` : "unknown";
+  if (mermaidReady && renderedNetworkKey === key) return;
   networkDiagram.textContent = "网络结构图加载中";
   try {
     if (!mermaidPromise) {
@@ -925,10 +981,11 @@ async function initNetworkDiagram() {
         fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
       },
     });
-    const { svg } = await mermaid.render("networkDiagramSvg", NETWORK_DIAGRAM);
+    const { svg } = await mermaid.render(`networkDiagramSvg-${key.replace(/[^a-z0-9_-]/gi, "-")}`, networkDiagramSource(model));
     networkDiagram.innerHTML = svg;
     networkDiagram.classList.add("is-rendered");
     mermaidReady = true;
+    renderedNetworkKey = key;
   } catch (error) {
     networkDiagram.textContent = "网络结构图加载失败。请检查 Mermaid CDN 连接。";
     networkDiagram.classList.add("diagram-error");
@@ -947,6 +1004,13 @@ sideInputs.forEach((input) => {
     if (!input.checked) return;
     selectedSide = input.value;
     sideLabel.textContent = selectedSide === "black" ? "执黑" : "执白";
+  });
+});
+
+modelInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    switchModel(input.value);
   });
 });
 
@@ -976,10 +1040,10 @@ networkDetails.addEventListener("toggle", () => {
 async function boot() {
   try {
     setBusy(true, "加载模型");
-    await callWorker("init");
+    await callWorker("init", { modelId: selectedModelId });
     loadBar.style.transform = "scaleX(1)";
     loadPercent.textContent = "100%";
-    loadText.textContent = "模型就绪，正在自动开局";
+    loadText.textContent = `${modelDisplayName(selectedModelId)} 就绪，正在自动开局`;
     setBusy(false);
     await newGame();
     loadLine.classList.add("ready");

@@ -1,0 +1,33 @@
+{
+  "format": "onnx",
+  "id": "v3",
+  "label": "v3 student",
+  "model": "gomoku10_best.onnx",
+  "storage": "chunks",
+  "bytes": 11952694,
+  "sha256": "ef3d62699ea4ece1ec3d6071d909fd252ee9912a60d6965009754138cda925cf",
+  "chunkSize": 25165824,
+  "chunks": [
+    {
+      "file": "gomoku10_best.onnx.part00",
+      "bytes": 11952694,
+      "sha256": "ef3d62699ea4ece1ec3d6071d909fd252ee9912a60d6965009754138cda925cf"
+    }
+  ],
+  "checkpoint": "outputs\\checkpoints\\v3-student-local\\gomoku10_best.pt",
+  "checkpointIteration": 90,
+  "config": {
+    "board_size": 10,
+    "win_length": 5,
+    "channels": 128,
+    "residual_blocks": 8,
+    "policy_channels": 12,
+    "value_channels": 6,
+    "value_hidden": 384,
+    "mcts_batch_size": 64,
+    "mcts_c_puct": 1.25,
+    "mcts_root_policy_temp": 1.1,
+    "mcts_dynamic_cpuct": true,
+    "mcts_fpu_reduction": 0.2
+  }
+}

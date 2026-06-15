@@ -13,7 +13,7 @@
         <div class="topbar">
           <div>
             <p class="eyebrow">浏览器 AlphaZero · 10×10 Gomoku</p>
-            <h1>AlphaZero <span class="nowrap">五子棋实验台</span></h1>
+            <h1>AlphaZero <span class="nowrap">五子棋</span></h1>
           </div>
           <div class="status-pill loading" id="statusPill" role="status" aria-live="polite">加载模型</div>
         </div>
@@ -63,8 +63,21 @@
         <section class="panel controls">
           <div class="panel-title">
             <span>对局设置</span>
-            <strong id="sideLabel">执白</strong>
+            <strong id="modelLabel">v3 student</strong>
           </div>
+          <fieldset class="segmented model-seg" aria-label="对战模型">
+            <legend class="sr-only">对战模型</legend>
+            <label class="segment model-option">
+              <input type="radio" name="model" value="v3" checked />
+              <span>v3 student</span>
+              <small>128×8 · iter 90</small>
+            </label>
+            <label class="segment model-option">
+              <input type="radio" name="model" value="v1" />
+              <span>v1 old best</span>
+              <small>192×12 · iter 95</small>
+            </label>
+          </fieldset>
           <fieldset class="segmented" aria-label="执棋">
             <legend class="sr-only">执棋</legend>
             <label class="segment">
@@ -76,6 +89,7 @@
               <span>我执白（后手）</span>
             </label>
           </fieldset>
+          <p class="control-note">当前执棋：<strong id="sideLabel">执白</strong></p>
 
           <label class="slider-row">
             <span>深算次数</span>

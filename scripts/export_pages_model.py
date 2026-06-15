@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -73,6 +74,9 @@ def main() -> None:
         type=Path,
         default=Path("docs/assets/model"),
     )
+    parser.add_argument("--model-id", default=None)
+    parser.add_argument("--model-label", default=None)
+    parser.add_argument("--catalog", type=Path, default=None)
     parser.add_argument("--opset", type=int, default=17)
     parser.add_argument("--chunk-mib", type=int, default=24)
     parser.add_argument(
@@ -87,6 +91,10 @@ def main() -> None:
     onnx_path = out_dir / "gomoku10_best.onnx"
 
     model, cfg = load_model(args.checkpoint, "cpu")
+    try:
+        payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    except TypeError:
+        payload = torch.load(args.checkpoint, map_location="cpu")
     wrapped = WebPolicyValueNet(model).eval()
     board_size = int(cfg.get("board_size", 10))
     dummy = torch.zeros((1, 2, board_size, board_size), dtype=torch.float32)
@@ -110,15 +118,24 @@ def main() -> None:
     chunks = split_file(onnx_path, out_dir, chunk_size)
     manifest = {
         "format": "onnx",
+        "id": args.model_id,
+        "label": args.model_label,
         "model": onnx_path.name,
         "storage": "chunks",
         "bytes": onnx_path.stat().st_size,
         "sha256": sha256_file(onnx_path),
         "chunkSize": chunk_size,
         "chunks": chunks,
+        "checkpoint": str(args.checkpoint),
+        "checkpointIteration": payload.get("iteration"),
         "config": {
             "board_size": int(cfg.get("board_size", 10)),
             "win_length": int(cfg.get("win_length", 5)),
+            "channels": int(cfg.get("channels", 64)),
+            "residual_blocks": int(cfg.get("residual_blocks", 4)),
+            "policy_channels": int(cfg.get("policy_channels", 2)),
+            "value_channels": int(cfg.get("value_channels", 1)),
+            "value_hidden": int(cfg.get("value_hidden", 128)),
             "mcts_batch_size": int(cfg.get("mcts_batch_size", 16)),
             "mcts_c_puct": float(cfg.get("mcts_c_puct", 1.5)),
             "mcts_root_policy_temp": float(cfg.get("mcts_root_policy_temp", 1.0)),
@@ -133,6 +150,31 @@ def main() -> None:
 
     print(f"exported {onnx_path} ({manifest['bytes']:,} bytes)")
     print(f"wrote {len(chunks)} chunks of at most {args.chunk_mib} MiB")
+    if args.catalog:
+        catalog_path = args.catalog
+        catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        catalog = {"defaultModel": args.model_id, "models": []}
+        if catalog_path.exists():
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        manifest_ref = os.path.relpath(out_dir / "manifest.json", catalog_path.parent).replace("\\", "/")
+        entry = {
+            "id": args.model_id or out_dir.name,
+            "label": args.model_label or args.model_id or out_dir.name,
+            "manifest": manifest_ref,
+            "iteration": payload.get("iteration"),
+            "bytes": manifest["bytes"],
+            "arch": {
+                "channels": manifest["config"]["channels"],
+                "residual_blocks": manifest["config"]["residual_blocks"],
+            },
+        }
+        models = [item for item in catalog.get("models", []) if item.get("id") != entry["id"]]
+        models.append(entry)
+        catalog["models"] = models
+        if not catalog.get("defaultModel"):
+            catalog["defaultModel"] = entry["id"]
+        catalog_path.write_text(json.dumps(catalog, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"updated catalog {catalog_path}")
     if not args.keep_onnx:
         onnx_path.unlink()
         print(f"removed full ONNX file; browser app will load {len(chunks)} chunks")

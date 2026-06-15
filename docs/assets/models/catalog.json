@@ -1,0 +1,27 @@
+{
+  "defaultModel": "v3",
+  "models": [
+    {
+      "id": "v3",
+      "label": "v3 student",
+      "manifest": "v3/manifest.json",
+      "iteration": 90,
+      "bytes": 11952694,
+      "arch": {
+        "channels": 128,
+        "residual_blocks": 8
+      }
+    },
+    {
+      "id": "v1",
+      "label": "v1 / old best",
+      "manifest": "../model/manifest.json",
+      "iteration": 95,
+      "bytes": 37777232,
+      "arch": {
+        "channels": 192,
+        "residual_blocks": 12
+      }
+    }
+  ]
+}

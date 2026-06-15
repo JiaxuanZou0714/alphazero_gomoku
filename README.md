@@ -175,14 +175,29 @@ python alphazero_gomoku/scripts/benchmark_checkpoints.py \
 
 ## GitHub Pages 静态页面
 
-`docs/` 是无需 Python 后端的静态对弈页面。
+`docs/` 是无需 Python 后端的静态对弈页面。页面可在浏览器里选择对战 `v1 / old best` 或 `v3 student`。
 
-导出模型：
+导出 v1 模型：
 
 ```powershell
 conda run -n alphazero-gomoku python scripts\export_pages_model.py `
   --checkpoint outputs\checkpoints\a100-4-prod-v3\gomoku10_best.pt `
   --out-dir docs\assets\model `
+  --model-id v1 `
+  --model-label "v1 / old best" `
+  --catalog docs\assets\models\catalog.json `
+  --chunk-mib 24
+```
+
+导出 v3 模型：
+
+```powershell
+conda run -n alphazero-gomoku python scripts\export_pages_model.py `
+  --checkpoint outputs\checkpoints\v3-student-local\gomoku10_best.pt `
+  --out-dir docs\assets\models\v3 `
+  --model-id v3 `
+  --model-label "v3 student" `
+  --catalog docs\assets\models\catalog.json `
   --chunk-mib 24
 ```
 

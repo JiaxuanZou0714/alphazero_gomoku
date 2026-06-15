@@ -1,5 +1,7 @@
 {
   "format": "onnx",
+  "id": "v1",
+  "label": "v1 / old best",
   "model": "gomoku10_best.onnx",
   "storage": "chunks",
   "bytes": 37777232,
@@ -17,9 +19,16 @@
       "sha256": "4c090f694b1d8b73ab0931a421b919669a2577c0020b1879e4360fa7ba14f7c7"
     }
   ],
+  "checkpoint": "outputs\\checkpoints\\a100-4-prod-v3\\gomoku10_best.pt",
+  "checkpointIteration": 95,
   "config": {
     "board_size": 10,
     "win_length": 5,
+    "channels": 192,
+    "residual_blocks": 12,
+    "policy_channels": 16,
+    "value_channels": 8,
+    "value_hidden": 512,
     "mcts_batch_size": 48,
     "mcts_c_puct": 1.25,
     "mcts_root_policy_temp": 1.1,

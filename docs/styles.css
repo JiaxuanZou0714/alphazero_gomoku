@@ -631,6 +631,11 @@ h1 {
   grid-template-columns: repeat(3, 1fr);
 }
 
+.model-seg {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 10px;
+}
+
 .segment {
   position: relative;
   display: grid;
@@ -667,6 +672,30 @@ h1 {
   min-width: 0;
 }
 
+.model-option {
+  align-content: center;
+  gap: 2px;
+  min-height: 56px;
+}
+
+.model-option span,
+.model-option small {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-option small {
+  position: relative;
+  z-index: 1;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+}
+
 .segment:hover:not(:has(input:disabled)) {
   background: rgba(255, 255, 255, 0.48);
 }
@@ -675,6 +704,10 @@ h1 {
 .segment:has(input:checked) {
   border-color: var(--line-strong);
   background: var(--surface);
+}
+
+.model-option:has(input:checked) small {
+  color: var(--accent-2);
 }
 
 .segment:has(input:disabled) {
@@ -781,6 +814,17 @@ h1 {
   margin: 14px 0 14px;
   color: var(--muted);
   font-size: 14px;
+}
+
+.control-note {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.control-note strong {
+  color: var(--ink);
 }
 
 .slider-row strong {
@@ -1555,6 +1599,10 @@ li {
 
   h1 {
     font-size: clamp(28px, 8.8vw, 34px);
+  }
+
+  .nowrap {
+    white-space: normal;
   }
 
   .board-area {

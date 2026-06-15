@@ -4,6 +4,9 @@ const ORT_BASE = new URL("assets/vendor/onnxruntime-web/", self.location.href).h
 
 let session = null;
 let modelConfig = null;
+let activeModel = null;
+let modelCatalog = null;
+const sessionCache = new Map();
 let game = null;
 
 function sendProgress(label, loaded, total) {
@@ -20,6 +23,17 @@ function statusText(state, humanPlayer) {
     return state.winner === humanPlayer ? "你赢了" : "AI 获胜";
   }
   return state.currentPlayer === humanPlayer ? "轮到你" : "AI 行棋";
+}
+
+function modelSummary(manifest, entry = null) {
+  const cfg = manifest.config || {};
+  return {
+    id: manifest.id || (entry && entry.id) || "default",
+    label: manifest.label || (entry && entry.label) || "model",
+    iteration: manifest.checkpointIteration ?? (entry && entry.iteration) ?? null,
+    bytes: manifest.bytes || (entry && entry.bytes) || 0,
+    config: cfg,
+  };
 }
 
 class GomokuState {
@@ -571,8 +585,9 @@ function buildSearchTree(root, state) {
 }
 
 class GameSession {
-  constructor(config) {
+  constructor(config, modelMeta) {
     this.config = config;
+    this.modelMeta = modelMeta;
     this.defaultSimulations = 512;
     this.mcts = new BrowserMCTS(config);
     this.state = GomokuState.new(
@@ -777,6 +792,7 @@ class GameSession {
       simulations: this.simulations,
       canUndo: this.undoStack.length > 0,
       status: statusText(this.state, this.humanPlayer),
+      model: this.modelMeta,
     };
   }
 }
@@ -805,16 +821,63 @@ async function fetchBytes(url, onProgress = null) {
   return bytes;
 }
 
-async function loadModel() {
+async function ensureRuntime() {
   sendProgress("加载运行时", 0, 1);
-  importScripts(`${ORT_BASE}ort.webgpu.min.js`);
-  ort.env.wasm.wasmPaths = ORT_BASE;
+  if (!self.ort) {
+    importScripts(`${ORT_BASE}ort.webgpu.min.js`);
+    ort.env.wasm.wasmPaths = ORT_BASE;
+  }
+}
 
+async function loadCatalog() {
+  if (modelCatalog) return modelCatalog;
+  const catalogUrl = new URL("assets/models/catalog.json", self.location.href);
+  const response = await fetch(catalogUrl);
+  if (response.ok) {
+    const catalog = await response.json();
+    modelCatalog = { catalog, baseUrl: catalogUrl };
+    return modelCatalog;
+  }
   const manifestUrl = new URL("assets/model/manifest.json", self.location.href);
+  modelCatalog = {
+    baseUrl: manifestUrl,
+    catalog: {
+      defaultModel: "v1",
+      models: [{ id: "v1", label: "v1 / old best", manifest: "manifest.json" }],
+    },
+  };
+  return modelCatalog;
+}
+
+async function resolveModelManifest(modelId = null) {
+  const { catalog, baseUrl } = await loadCatalog();
+  const selectedId = modelId || catalog.defaultModel || (catalog.models[0] && catalog.models[0].id);
+  const entry = catalog.models.find((item) => item.id === selectedId) || catalog.models[0];
+  if (!entry) throw new Error("模型目录为空");
+  const manifestUrl = new URL(entry.manifest, baseUrl);
   const manifest = await fetch(manifestUrl).then((r) => {
-    if (!r.ok) throw new Error("没有找到模型 manifest，请先运行导出脚本");
+    if (!r.ok) throw new Error(`没有找到模型 manifest: ${entry.manifest}`);
     return r.json();
   });
+  return { entry, manifest, manifestUrl };
+}
+
+async function loadModel(modelId = null) {
+  await ensureRuntime();
+  const { entry, manifest, manifestUrl } = await resolveModelManifest(modelId);
+  const meta = modelSummary(manifest, entry);
+  if (activeModel && activeModel.id === meta.id && session && modelConfig) {
+    return;
+  }
+  if (sessionCache.has(meta.id)) {
+    const cached = sessionCache.get(meta.id);
+    session = cached.session;
+    modelConfig = cached.modelConfig;
+    activeModel = cached.activeModel;
+    game = new GameSession(modelConfig, activeModel);
+    sendProgress(`${activeModel.label} 已缓存`, 1, 1);
+    return;
+  }
 
   const total = manifest.bytes || manifest.chunks.reduce((sum, chunk) => sum + chunk.bytes, 0);
   const parts = [];
@@ -822,11 +885,11 @@ async function loadModel() {
   for (const [index, chunk] of manifest.chunks.entries()) {
     const url = new URL(chunk.file, manifestUrl);
     const bytes = await fetchBytes(url, (partLoaded) => {
-      sendProgress(`加载模型 ${index + 1}/${manifest.chunks.length}`, loaded + partLoaded, total);
+      sendProgress(`${meta.label} ${index + 1}/${manifest.chunks.length}`, loaded + partLoaded, total);
     });
     parts.push(bytes);
     loaded += bytes.byteLength;
-    sendProgress(`加载模型 ${index + 1}/${manifest.chunks.length}`, loaded, total);
+    sendProgress(`${meta.label} ${index + 1}/${manifest.chunks.length}`, loaded, total);
   }
 
   const modelBytes = new Uint8Array(loaded);
@@ -836,7 +899,7 @@ async function loadModel() {
     offset += part.byteLength;
   }
 
-  sendProgress("初始化模型", total, total);
+  sendProgress(`初始化 ${meta.label}`, total, total);
   modelConfig = manifest.config || {};
   try {
     session = await ort.InferenceSession.create(modelBytes.buffer, {
@@ -849,7 +912,9 @@ async function loadModel() {
       graphOptimizationLevel: "all",
     });
   }
-  game = new GameSession(modelConfig);
+  activeModel = meta;
+  sessionCache.set(activeModel.id, { session, modelConfig, activeModel });
+  game = new GameSession(modelConfig, activeModel);
 }
 
 self.addEventListener("message", async (event) => {
@@ -857,8 +922,8 @@ self.addEventListener("message", async (event) => {
   try {
     let result;
     if (type === "init") {
-      await loadModel();
-      result = { ok: true };
+      await loadModel(payload.modelId);
+      result = { ok: true, model: activeModel };
     } else {
       if (!game) throw new Error("模型尚未加载");
       if (type === "newGame") result = await game.newGame(payload.human, payload.simulations);
