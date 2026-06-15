@@ -268,6 +268,8 @@ scripts\train_v3_student_local.cmd
 
 `v3-student-local` 使用 `128` channels、`8` 个 residual blocks、全局池化和软策略头，比 old best 的 `192x12` 更轻。RL 阶段仍保留 KataGo 风格的 root policy temperature、shaped Dirichlet、dynamic cPUCT、FPU、forced playouts、playout cap randomization、随机开局评估和 champion gate。它还会在 replay 低于 `25k` 原始局面时跳过训练，并把每轮训练步数限制为最多扫 replay `2` 遍，避免 v2 那种小 replay 反复拟合。
 
+Windows 本地默认使用 `1` 个 self-play worker，这是为了避开部分终端环境下多进程管道权限和临时目录句柄问题；如果你在自己的终端里确认多进程可用，可以通过 `--self-play-workers 4` 覆盖。
+
 进入 RL 前至少跑一次：
 
 ```bash

@@ -6,10 +6,9 @@ import copy
 import json
 import math
 import multiprocessing as mp
-import queue
 import random
 import shutil
-import tempfile
+import sys
 import time
 from collections import deque
 from contextlib import nullcontext
@@ -388,7 +387,7 @@ def preset_config(name: str) -> TrainConfig:
         cfg.replay_save_interval = 2
         cfg.metrics_path = "alphazero_gomoku/outputs/metrics/v3-student-local.jsonl"
         cfg.resume = "alphazero_gomoku/outputs/checkpoints/distill-oldbest-128x8/gomoku10_student_best.pt"
-        cfg.self_play_workers = 4
+        cfg.self_play_workers = 1
         cfg.self_play_devices = "auto"
         cfg.eval_interval = 5
         cfg.eval_games = 20
@@ -822,7 +821,6 @@ def play_self_games_worker(
     device: str,
     worker_id: int,
     iteration: int = 0,
-    progress_queue: object | None = None,
 ) -> tuple[list[Example], list[float], list[int], dict[str, float], str]:
     limit_worker_threads()
     enable_fast_math()
@@ -840,9 +838,7 @@ def play_self_games_worker(
     entropies: list[float] = []
     winners: list[float] = []
     full_search_rates: list[float] = []
-    worker_start = time.monotonic()
     for game_index in range(1, games + 1):
-        game_start = time.monotonic()
         game_examples, game_kls, game_stats = play_self_game(model, cfg, mcts_cfg)
         examples.extend(game_examples)
         kl_surprises.extend(game_kls)
@@ -850,22 +846,6 @@ def play_self_games_worker(
         entropies.append(game_stats["policy_entropy"])
         winners.append(game_stats["winner"])
         full_search_rates.append(game_stats["full_search_rate"])
-        if progress_queue is not None:
-            progress_queue.put(
-                {
-                    "type": "selfplay_game",
-                    "iteration": iteration,
-                    "worker_id": worker_id,
-                    "device": device,
-                    "game_index": game_index,
-                    "games": games,
-                    "moves": len(game_examples),
-                    "examples": len(game_examples),
-                    "policy_entropy": game_stats["policy_entropy"],
-                    "game_seconds": time.monotonic() - game_start,
-                    "worker_seconds": time.monotonic() - worker_start,
-                }
-            )
     stats = {
         "policy_entropy": float(np.mean(entropies)) if entropies else 0.0,
         "black_win_rate": float(np.mean([winner == 1 for winner in winners])) if winners else 0.0,
@@ -968,86 +948,72 @@ def collect_self_play_examples(
     done_games = 0
     start = time.monotonic()
     last_heartbeat = start
-    with tempfile.TemporaryDirectory(
-        prefix="az_selfplay_",
-        ignore_cleanup_errors=True,
-    ) as temp_dir, context.Manager() as manager:
-        model_state_path = str(Path(temp_dir) / f"iter_{iteration:04d}_model.pt")
-        torch.save(cpu_state_dict(model), model_state_path)
-        progress_queue = manager.Queue()
-        with concurrent.futures.ProcessPoolExecutor(
+    # On Windows, tempfile roots can be blocked by process-handle races. Store
+    # these small per-iteration snapshots next to regular checkpoints instead.
+    snapshot_dir = (
+        Path(cfg.checkpoint_dir)
+        / "_selfplay_tmp"
+        / f"iter_{iteration:04d}_{int(time.time() * 1000)}"
+    )
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    model_state_path = str(snapshot_dir / "model.pt")
+    torch.save(cpu_state_dict(model), model_state_path)
+    if sys.platform == "win32":
+        executor_context = concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs))
+    else:
+        executor_context = concurrent.futures.ProcessPoolExecutor(
             max_workers=len(jobs), mp_context=context
-        ) as executor:
-            futures = [
-                executor.submit(
-                    play_self_games_worker,
-                    cfg_data,
-                    mcts_data,
-                    model_state_path,
-                    games,
-                    device,
-                    worker_id,
-                    iteration,
-                    progress_queue,
+        )
+    with executor_context as executor:
+        futures = [
+            executor.submit(
+                play_self_games_worker,
+                cfg_data,
+                mcts_data,
+                model_state_path,
+                games,
+                device,
+                worker_id,
+                iteration,
+            )
+            for worker_id, device, games in jobs
+        ]
+        pending = set(futures)
+        while pending:
+            now = time.monotonic()
+            if now - last_heartbeat >= 30:
+                elapsed = now - start
+                if done_games:
+                    avg = elapsed / done_games
+                    eta_text = format_duration(avg * (total_games - done_games))
+                else:
+                    eta_text = "warming_up"
+                print(
+                    f"selfplay_wait iter={iteration} games={done_games}/"
+                    f"{total_games} elapsed={format_duration(elapsed)} "
+                    f"eta={eta_text}",
+                    flush=True,
                 )
-                for worker_id, device, games in jobs
-            ]
-            pending = set(futures)
-            while pending:
-                try:
-                    event = progress_queue.get(timeout=1.0)
-                except queue.Empty:
-                    event = None
+                last_heartbeat = now
 
-                now = time.monotonic()
-                if event is not None and event.get("type") == "selfplay_game":
-                    done_games += 1
-                    elapsed = now - start
-                    avg = elapsed / max(1, done_games)
-                    eta = avg * (total_games - done_games)
-                    print(
-                        f"selfplay_progress iter={iteration} games={done_games}/"
-                        f"{total_games} elapsed={format_duration(elapsed)} "
-                        f"eta={format_duration(eta)} worker={event['worker_id']} "
-                        f"device={event['device']} worker_game={event['game_index']}/"
-                        f"{event['games']} moves={event['moves']} "
-                        f"policy_entropy={event['policy_entropy']:.3f} "
-                        f"game_time={format_duration(event['game_seconds'])}",
-                        flush=True,
-                    )
-                    last_heartbeat = now
-                elif now - last_heartbeat >= 30:
-                    elapsed = now - start
-                    if done_games:
-                        avg = elapsed / done_games
-                        eta_text = format_duration(avg * (total_games - done_games))
-                    else:
-                        eta_text = "warming_up"
-                    print(
-                        f"selfplay_wait iter={iteration} games={done_games}/"
-                        f"{total_games} elapsed={format_duration(elapsed)} "
-                        f"eta={eta_text}",
-                        flush=True,
-                    )
-                    last_heartbeat = now
-
-                done, pending = concurrent.futures.wait(
-                    pending,
-                    timeout=0,
-                    return_when=concurrent.futures.FIRST_COMPLETED,
+            done, pending = concurrent.futures.wait(
+                pending,
+                timeout=0,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for future in done:
+                examples, kl_surprises, lengths, stats, device = future.result()
+                all_examples.extend(examples)
+                all_kl_surprises.extend(kl_surprises)
+                all_lengths.extend(lengths)
+                all_stats.append(stats)
+                done_games += len(lengths)
+                print(
+                    f"selfplay_worker_done iter={iteration} device={device} "
+                    f"games={done_games}/{total_games} worker_games={len(lengths)} "
+                    f"examples={len(examples)} policy_entropy={stats['policy_entropy']:.3f}",
+                    flush=True,
                 )
-                for future in done:
-                    examples, kl_surprises, lengths, stats, device = future.result()
-                    all_examples.extend(examples)
-                    all_kl_surprises.extend(kl_surprises)
-                    all_lengths.extend(lengths)
-                    all_stats.append(stats)
-                    print(
-                        f"selfplay_worker_done iter={iteration} device={device} "
-                        f"games={len(lengths)} examples={len(examples)} "
-                        f"policy_entropy={stats['policy_entropy']:.3f}",
-                        flush=True,
-                    )
     return all_examples, all_kl_surprises, all_lengths, merge_stats(all_stats)
 
 
