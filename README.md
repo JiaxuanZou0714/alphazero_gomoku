@@ -123,6 +123,8 @@ L = CE(策略头, π)  +  1.5 · MSE(价值头, 目标值)  +  4 · CE(软策略
 
 ## 当前模型
 
+版本迭代记录见 [docs/VERSION_HISTORY.md](docs/VERSION_HISTORY.md)。
+
 最强模型是 v3 完整训练（100 轮 + KataGo 全套改进）第 95 轮晋升的 champion：
 
 ```text
