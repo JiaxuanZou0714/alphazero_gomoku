@@ -21,12 +21,15 @@ from alphazero_gomoku.train import (
     evaluate_candidate,
     effective_train_steps,
     load_replay,
+    load_resume_checkpoint,
+    make_model,
     mcts_config_from_train,
     play_self_game,
     preset_config,
     random_opening,
     replay_to_dataset,
     run_training,
+    save_checkpoint,
     save_replay,
     train_epoch,
 )
@@ -375,6 +378,88 @@ class OwnershipDataTest(unittest.TestCase):
         ds, _ = replay_to_dataset(self._examples_with_ownership(8), None, use_ownership=True)
         stats = train_epoch(model, opt, deque(), cfg, None, dataset=ds, train_steps_to_run=2)
         self.assertTrue(np.isfinite(stats.loss))
+
+
+class PartialResumeTest(unittest.TestCase):
+    """Warm-start a use_ownership=True model from a checkpoint that has no
+    ownership head (the v3 -> v4 case): the shared tower must load and only the
+    new head may stay freshly initialised."""
+
+    def _base_cfg(self, checkpoint_dir: str, **overrides) -> TrainConfig:
+        cfg = TrainConfig(
+            channels=8, residual_blocks=1, value_hidden=16,
+            use_soft_policy=True, device="cpu", checkpoint_dir=checkpoint_dir,
+        )
+        for key, value in overrides.items():
+            setattr(cfg, key, value)
+        return cfg
+
+    def _save_source(self, tmp: str) -> str:
+        src_cfg = self._base_cfg(tmp, use_ownership=False)
+        torch.manual_seed(1)
+        src_model = make_model(src_cfg)
+        opt = torch.optim.AdamW(src_model.parameters(), lr=1e-3)
+        path = save_checkpoint(src_model, opt, src_cfg, iteration=90)
+        return str(path)
+
+    def test_warm_start_loads_tower_and_keeps_fresh_head(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src_path = self._save_source(tmp)
+            src = torch.load(src_path, map_location="cpu", weights_only=False)["model"]
+
+            cfg = self._base_cfg(tmp, use_ownership=True, ownership_loss_weight=0.15,
+                                 resume=src_path, resume_allow_partial=True)
+            torch.manual_seed(2)
+            model = make_model(cfg)
+            opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+            start = load_resume_checkpoint(model, opt, cfg)
+
+            # warm-start resets the iteration counter
+            self.assertEqual(start, 0)
+            # the new ownership head exists and was not present in the source
+            self.assertIsNotNone(model.ownership_head)
+            self.assertFalse(any("ownership_head" in k for k in src))
+            # every shared tower/head tensor came from the checkpoint verbatim
+            loaded = model.state_dict()
+            for key, tensor in src.items():
+                self.assertTrue(torch.equal(loaded[key], tensor), f"mismatch {key}")
+
+    def test_partial_resume_requires_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src_path = self._save_source(tmp)
+            cfg = self._base_cfg(tmp, use_ownership=True, resume=src_path,
+                                 resume_allow_partial=False)
+            model = make_model(cfg)
+            opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+            with self.assertRaises(RuntimeError):
+                load_resume_checkpoint(model, opt, cfg)
+
+    def test_tower_mismatch_still_raises_even_with_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src_path = self._save_source(tmp)  # channels=8
+            cfg = self._base_cfg(tmp, channels=16, use_ownership=True,
+                                 resume=src_path, resume_allow_partial=True)
+            model = make_model(cfg)
+            opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+            with self.assertRaises(RuntimeError):
+                load_resume_checkpoint(model, opt, cfg)
+
+
+class V4PresetTest(unittest.TestCase):
+    def test_v4_preset_warm_starts_v3_with_katago_extras(self) -> None:
+        cfg = preset_config("v4-student-3080")
+        # same tower as the v3 student so the shared weights load
+        v3 = preset_config("v3-student-local")
+        for key in ("channels", "residual_blocks", "policy_channels",
+                    "value_channels", "value_hidden", "use_global_pool",
+                    "use_soft_policy"):
+            self.assertEqual(getattr(cfg, key), getattr(v3, key), key)
+        # KataGo extras on + warm-start from v3 best
+        self.assertTrue(cfg.use_ownership)
+        self.assertGreater(cfg.ownership_loss_weight, 0.0)
+        self.assertGreater(cfg.ema_decay, 0.0)
+        self.assertTrue(cfg.resume_allow_partial)
+        self.assertTrue(cfg.resume.endswith("v3-student-local/gomoku10_best.pt"))
 
 
 if __name__ == "__main__":

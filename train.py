@@ -118,6 +118,11 @@ class TrainConfig:
     metrics_path: str = ""
     checkpoint_dir: str = "outputs/checkpoints"
     resume: str = ""
+    # Warm-start across an additive architecture change: load the shared tower
+    # from `resume` and leave a newly-added head (ownership / soft policy) freshly
+    # initialised, resetting the iteration counter and optimizer for a fresh
+    # schedule. Off by default so a genuine architecture mismatch still errors.
+    resume_allow_partial: bool = False
     device: str = "auto"
     self_play_workers: int = 1
     self_play_devices: str = "auto"
@@ -385,6 +390,67 @@ PRESETS: dict[str, dict[str, object]] = {
         "early_stop_evals": 3,
         **_KATAGO_DEFAULTS,
     },
+    # v4: warm-start the 128x8 v3 student and continue self-play with the KataGo
+    # extras turned on (ownership auxiliary head + EMA-of-weights + bf16 AMP),
+    # sized for an overnight run on a single RTX 3080 (16 GB). Same tower as v3 so
+    # `resume_allow_partial` loads every shared weight and only the new ownership
+    # head starts fresh. The EMA snapshot is what gets gated/promoted, so the
+    # saved best only advances when it actually beats the v3 champion.
+    "v4-student-3080": {
+        "iterations": 36,
+        "games_per_iteration": 64,
+        "simulations": 224,
+        "mcts_batch_size": 32,
+        "epochs": 2,
+        "train_steps_per_iteration": 80,
+        "batch_size": 1536,
+        "replay_size": 60_000,
+        "min_replay_size": 12_000,
+        "max_train_replay_passes": 2.0,
+        "learning_rate": 3.0e-5,      # gentle finetune of an already-converged net
+        "min_learning_rate": 5.0e-6,
+        "lr_schedule": "cosine",
+        "warmup_iterations": 2,
+        "weight_decay": 1.0e-4,
+        "max_grad_norm": 10.0,
+        "temperature_moves": 12,
+        "mcts_c_puct": 1.25,
+        "mcts_dirichlet_alpha": 0.15,
+        "channels": 128,              # MUST match v3 so the shared tower loads
+        "residual_blocks": 8,
+        "policy_channels": 12,
+        "value_channels": 6,
+        "value_hidden": 384,
+        "soft_policy_loss_weight": 2.0,
+        "value_loss_weight": 1.25,
+        "surprise_weighting": False,
+        "mcts_value_weight": 0.25,
+        "full_search_prob": 0.35,
+        "fast_simulations": 56,
+        "use_ownership": True,        # KataGo dense per-cell auxiliary supervision
+        "ownership_loss_weight": 0.15,
+        "ema_decay": 0.9,            # ~10-iteration weight window; EMA is gated/promoted
+        "checkpoint_dir": "alphazero_gomoku/outputs/checkpoints/v4-student-3080",
+        "replay_path": "alphazero_gomoku/outputs/replay/v4-student-3080_replay.pt",
+        "replay_save_interval": 2,
+        "metrics_path": "alphazero_gomoku/outputs/metrics/v4-student-3080.jsonl",
+        "resume": "alphazero_gomoku/outputs/checkpoints/v3-student-local/gomoku10_best.pt",
+        "resume_allow_partial": True,
+        "self_play_workers": 3,
+        "self_play_devices": "auto",
+        "eval_interval": 4,
+        "eval_games": 24,
+        "eval_simulations": 224,
+        "eval_opening_moves": 4,
+        "eval_progress_interval": 1,
+        "eval_workers": 3,
+        "train_data_workers": 2,
+        "eval_early_cutoff": True,
+        "promotion_threshold": 0.55,
+        "gate_evaluation": True,
+        "early_stop_evals": 4,
+        **_KATAGO_DEFAULTS,
+    },
     "a100-4": {
         "iterations": 100,
         "games_per_iteration": 96,
@@ -565,6 +631,48 @@ def architecture_from_config(cfg: TrainConfig) -> dict[str, object]:
     return model_kwargs_from_config(asdict(cfg))
 
 
+# Architecture flags that only ADD an output head on top of the shared tower.
+# A checkpoint without the head can warm-start a model that has it: every shared
+# tensor loads and only the named head is left freshly initialised. The tower
+# itself (channels / blocks / value width / ...) must still match exactly.
+_ADDITIVE_RESUME_HEADS: dict[str, str] = {
+    "use_ownership": "ownership_head",
+    "use_soft_policy": "soft_policy_head",
+}
+
+
+def _additive_resume_only(found: dict[str, object], expected: dict[str, object]) -> bool:
+    """True iff every architecture difference is an additive head going off->on."""
+    diff = {key for key in expected if expected.get(key) != found.get(key)}
+    if not diff or not diff <= set(_ADDITIVE_RESUME_HEADS):
+        return False
+    return all(bool(expected.get(key)) and not bool(found.get(key)) for key in diff)
+
+
+def _load_partial_resume(model: PolicyValueNet, checkpoint: dict, path: Path) -> int:
+    """Load the shared tower from a checkpoint missing one or more output heads.
+
+    Returns 0: a head change makes the old optimizer state and iteration count
+    meaningless, so the caller runs a fresh schedule (warm-start) from the loaded
+    weights.
+    """
+    result = model.load_state_dict(checkpoint["model"], strict=False)
+    allowed = tuple(_ADDITIVE_RESUME_HEADS.values())
+    unmapped_missing = [k for k in result.missing_keys if not k.startswith(allowed)]
+    if result.unexpected_keys or unmapped_missing:
+        raise RuntimeError(
+            f"partial resume from {path} could not be reconciled: "
+            f"unexpected={list(result.unexpected_keys)} unmapped_missing={unmapped_missing}"
+        )
+    fresh_heads = sorted({k.split(".", 1)[0] for k in result.missing_keys})
+    print(
+        f"resume_partial path={path} loaded_shared_tower=true fresh_heads={fresh_heads} "
+        f"(warm-start: iteration reset to 0, optimizer reinitialised)",
+        flush=True,
+    )
+    return 0
+
+
 def load_resume_checkpoint(
     model: PolicyValueNet,
     optimizer: torch.optim.Optimizer,
@@ -579,9 +687,16 @@ def load_resume_checkpoint(
     expected = architecture_from_config(cfg)
     found = model_kwargs_from_config(checkpoint_cfg)
     if found != expected:
+        if cfg.resume_allow_partial and _additive_resume_only(found, expected):
+            return _load_partial_resume(model, checkpoint, path)
+        hint = (
+            ""
+            if cfg.resume_allow_partial
+            else " (set resume_allow_partial to warm-start across an added head)"
+        )
         raise RuntimeError(
             "resume checkpoint architecture does not match current config: "
-            f"checkpoint={found} current={expected}"
+            f"checkpoint={found} current={expected}{hint}"
         )
 
     model.load_state_dict(checkpoint["model"])
@@ -1853,6 +1968,9 @@ def _log_run_config(cfg: TrainConfig) -> None:
         f"eval_workers={cfg.eval_workers} "
         f"eval_devices={split_devices(cfg.eval_devices, cfg.device)} "
         f"amp={cfg.amp} amp_dtype={cfg.amp_dtype} mcts_amp_dtype={cfg.mcts_amp_dtype} "
+        f"ema_decay={cfg.ema_decay} use_ownership={cfg.use_ownership} "
+        f"ownership_loss_weight={cfg.ownership_loss_weight} "
+        f"resume={cfg.resume or 'none'} resume_allow_partial={cfg.resume_allow_partial} "
         f"metrics_path={cfg.metrics_path or 'none'}",
         flush=True,
     )
@@ -2154,6 +2272,7 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
             "v2",
             "v3-local",
             "v3-student-local",
+            "v4-student-3080",
             "a100-4",
             "a100-fast",
             "a100-turbo",
@@ -2229,6 +2348,12 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--replay-path", default=defaults.replay_path)
     parser.add_argument("--replay-save-interval", type=int, default=defaults.replay_save_interval)
     parser.add_argument("--resume", default=defaults.resume)
+    parser.add_argument(
+        "--resume-allow-partial", dest="resume_allow_partial", action="store_true"
+    )
+    parser.add_argument(
+        "--no-resume-allow-partial", dest="resume_allow_partial", action="store_false"
+    )
     parser.add_argument("--device", default=defaults.device)
     parser.add_argument("--self-play-workers", type=int, default=defaults.self_play_workers)
     parser.add_argument("--self-play-devices", default=defaults.self_play_devices)
@@ -2280,6 +2405,7 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
         eval_early_cutoff=defaults.eval_early_cutoff,
         compile_model=defaults.compile_model,
         amp=defaults.amp,
+        resume_allow_partial=defaults.resume_allow_partial,
     )
     return parser
 
@@ -2293,6 +2419,7 @@ def main() -> None:
             "v2",
             "v3-local",
             "v3-student-local",
+            "v4-student-3080",
             "a100-4",
             "a100-fast",
             "a100-turbo",
