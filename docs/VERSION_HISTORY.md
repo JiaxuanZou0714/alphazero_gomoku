@@ -1,6 +1,6 @@
 # 版本记录
 
-最后更新：2026-06-15
+最后更新：2026-06-16
 
 本文只记录训练版本和基础设施版本，不记录普通代码提交。每个版本统一使用以下字段：
 
@@ -64,6 +64,15 @@
 - 关键改动：新增 `--eval-workers`、`--eval-devices`、`--train-data-workers`、`--train-prefetch-factor`；eval 改为多 worker 多 GPU 并行；self-play/eval 临时快照自动清理；checkpoint、best checkpoint、replay 改为临时文件写入后原子替换。
 - 结果：旧串行 eval 约 `8/20` 局耗时 `9m37s`；新并行 eval `20/20` 局耗时约 `2m42s`。重启后前几轮 `skipped=0`、`value_clamps=0`。
 - 结论：后续 A100 训练默认使用这套 infra。
+
+## v4-student-3080
+
+- 状态：`active（与 v3 基本持平，已上线为可选模型）`
+- 目标：在 v3 student 之上叠加 KataGo 的 ownership 辅助头 + EMA-of-weights，并新增 self-play 开局多样化，用本地 RTX 3080 继续 RL；重点改善对人类/非常规开局（尤其执白后手）的鲁棒性。
+- 起点/产物：`--preset v4-student-3080`，warm-start 自 `v3-student-local/gomoku10_best.pt`。两者同构（`128x8`），v4 仅新增 ownership 头，故用 `resume_allow_partial` 复用共享塔、只随机初始化新头，并重置迭代/优化器走全新 schedule。产物 `outputs/checkpoints/v4-student-3080/gomoku10_best.pt`（晋升的是第 `35` 轮的 EMA best），指标 `outputs/metrics/v4-student-3080.jsonl`，对战记录 `outputs/metrics/v4_vs_v3_benchmark.jsonl`。
+- 关键改动：opt-in ownership 辅助头（`ownership_loss_weight=0.15`）；EMA（`ema_decay=0.9`，被评估/晋升/保存为 best 的是 EMA 快照，gate 失败不回滚训练模型）；train-time bf16 AMP；self-play 开局多样化（`selfplay_opening_moves=6`、`selfplay_opening_prob=0.5`：半数对局以 1-6 步随机合法开局起步，奇数步让模型执白）。3080 上 3 self-play worker（实测多于 3 个反而更慢，单 GPU kernel 争用），~2.3 min/轮；replay 达 `4k` 后第 4 轮起训练，每 5 轮做 gate（`16` 局 @`128` sims）。
+- 结果：训练健康（`loss 8.97 -> 7.9`、`value_acc 0.86 -> 0.916`、`policy_top1 0.55 -> 0.68`），共晋升 `4` 次（iter `10/25/30/35`），第 `56` 轮在连续 4 次未晋升的平台期手动停止（cosine 尾段收益递减）。对 v3 的 head-to-head（`60` 局 @`256` sims、随机开局、黑白互换）为 **`33-27-0`，score `0.550`**；分色：执黑 `17-13`（`0.567`）、执白 `16-14`（`0.533`）——执白后手并不吃亏。self-play 黑/白胜率也从 v3 的 `~0.69/0.31` 收窄到 `~0.58/0.42`。
+- 结论：与 v3 **基本持平**（`0.55` 落在 60 局噪声区间内，未达到“明显超过”的晋升门槛），但黑白更均衡、对非常规开局更鲁棒，并验证了 ownership/EMA/开局多样化三项改动可正常训练。按晋升规则 v3 仍是网页**默认**；v4 已加入 `catalog.json` 可在网页选择。若更看重鲁棒性，把 `catalog.json` 的 `defaultModel` 改为 `v4` 即可（网页选择器与 worker 回退目录均已包含 v4）。
 
 ## checkpoint 晋升规则
 

@@ -96,6 +96,7 @@ python -m alphazero_gomoku.train --preset <preset> [--device cuda] [其它覆盖
 | preset | 用途 |
 |--------|------|
 | `local` | 极小配置，本地冒烟测试整条流程 |
+| `v4-student-3080` | warm-start v3 + ownership/EMA/开局多样化，本地 3080 续训（与 v3 持平、色彩更均衡） |
 | `v3-student-local` | 当前主线：从 128x8 student 起步做 RL |
 | `v3-local` | 从 old best 直接继续 RL（归档复现路线） |
 | `v2` | 长训续训实验（已判失败，保留复现） |
@@ -176,7 +177,7 @@ python scripts/benchmark_checkpoints.py \
 
 ## GitHub Pages 静态页面
 
-`docs/` 是纯静态页面（无 Python 后端），用 onnxruntime-web 在浏览器里跑模型，可在页面切换对战 `v1 / old best` 或 `v3 student`。模型按 `docs/assets/models/<id>/` 统一存放，分块文件 + `manifest.json` 由 `catalog.json` 索引。
+`docs/` 是纯静态页面（无 Python 后端），用 onnxruntime-web 在浏览器里跑模型，可在页面切换对战 `v3 student`（默认）、`v4 student` 或 `v1 / old best`。模型按 `docs/assets/models/<id>/` 统一存放，分块文件 + `manifest.json` 由 `catalog.json` 索引（`defaultModel` 决定默认加载哪个）。
 
 导出一个模型（`--out-dir` 省略时自动推导为 `docs/assets/models/<model-id>`）：
 

@@ -23,6 +23,7 @@ outputs/tmp/
 outputs/metrics/distill*.jsonl
 outputs/metrics/v2*.jsonl
 outputs/metrics/v3*.jsonl
+outputs/metrics/v4*.jsonl
 # Raw (un-split) ONNX export; only the chunked *.onnx.part* files are committed
 # so the browser app can stream them under GitHub's 100MB blob limit.
 docs/assets/models/**/*.onnx

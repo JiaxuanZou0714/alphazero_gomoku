@@ -53,7 +53,7 @@ const sideInputs = [...document.querySelectorAll("input[name='side']")];
 const modelInputs = [...document.querySelectorAll("input[name='model']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 
-const APP_VERSION = "2026-06-15-multi-model";
+const APP_VERSION = "2026-06-16-v4";
 let state = null;
 let selectedSide = "white";
 let selectedModelId = "v3";

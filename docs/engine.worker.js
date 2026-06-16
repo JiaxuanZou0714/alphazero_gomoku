@@ -918,6 +918,7 @@ async function loadCatalog() {
       defaultModel: "v3",
       models: [
         { id: "v3", label: "v3 student", manifest: "v3/manifest.json" },
+        { id: "v4", label: "v4 student", manifest: "v4/manifest.json" },
         { id: "v1", label: "v1 / old best", manifest: "v1/manifest.json" },
       ],
     },
