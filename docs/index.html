@@ -257,8 +257,17 @@
         <details class="network-details">
           <summary>模型结构</summary>
           <section class="panel network-panel">
+            <div class="arch-picker">
+              <span class="arch-picker-label">查看结构</span>
+              <fieldset class="segmented arch-seg" aria-label="选择要查看结构的模型">
+                <legend class="sr-only">选择要查看结构的模型</legend>
+                <label class="segment"><input type="radio" name="archModel" value="v3" checked /><span>v3</span></label>
+                <label class="segment"><input type="radio" name="archModel" value="v4" /><span>v4</span></label>
+                <label class="segment"><input type="radio" name="archModel" value="v1" /><span>v1</span></label>
+              </fieldset>
+            </div>
             <div class="network-diagram" id="networkDiagram">网络结构图加载中</div>
-            <p class="network-copy">当前模型只看棋盘黑白两层，不注入定式或人工规则；CNN 输出落点 logits 和局面 value，MCTS 反复调用它来比较候选。</p>
+            <p class="network-copy">结构图为静态示意，可独立切换查看，无需等待该模型权重加载。网络只看棋盘黑白两层，不注入定式或人工规则；CNN 输出落点 logits 和局面 value，MCTS 反复调用它来比较候选。</p>
           </section>
         </details>
       </details>

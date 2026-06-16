@@ -1128,40 +1128,37 @@ tr.empty-row td {
   font-family: inherit;
 }
 
-.network-diagram svg {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  margin: 0 auto;
+.arch-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  margin-bottom: 12px;
 }
 
-.netnode rect {
-  fill: #ffffff;
-  stroke: var(--line-strong);
-  stroke-width: 1;
-}
-
-.netnode-title {
-  fill: var(--ink);
+.arch-picker-label {
+  color: var(--soft);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
-.netnode-sub {
-  fill: var(--muted);
-  font-size: 11px;
-  font-weight: 680;
-  font-variant-numeric: tabular-nums;
+.arch-seg {
+  grid-template-columns: repeat(3, minmax(52px, 1fr));
+  max-width: 240px;
 }
 
-.netedge {
-  stroke: var(--line-strong);
-  stroke-width: 1.6;
-  fill: none;
+.arch-seg .segment {
+  min-height: 38px;
+  padding: 5px 10px;
 }
 
-.netarrow {
-  fill: var(--line-strong);
+/* Pre-rendered model-architecture figure (one SVG per model). */
+.network-figure {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 1000px;
+  margin: 0 auto;
 }
 
 .diagram-error {

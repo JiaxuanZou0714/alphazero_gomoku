@@ -11,7 +11,7 @@
  *     them against the manifest sha256 and persists the assembled bytes in IndexedDB,
  *     so SW-caching them too would just double-store ~tens of MB per model.
  * Bump CACHE_VERSION to roll the shell/vendor cache when those assets change. */
-const CACHE_VERSION = "az-gomoku-v4";
+const CACHE_VERSION = "az-gomoku-v8";
 
 // Resolve relative to the worker scope so it works under the GitHub Pages
 // subpath (e.g. /alphazero_gomoku/).
@@ -59,8 +59,9 @@ function strategyFor(request) {
   if (/\.onnx\.part\d+$/.test(path)) return "passthrough";
   // Model metadata must reflect the latest deploy/export.
   if (path.includes("/assets/models/") && path.endsWith(".json")) return "network-first";
-  // Vendored libraries are effectively immutable for a given deploy.
+  // Vendored libraries and pre-rendered diagrams are immutable for a deploy.
   if (path.includes("/assets/vendor/")) return "cache-first";
+  if (path.includes("/assets/diagrams/")) return "cache-first";
   if (APP_SHELL.includes(url.href.split("?")[0])) return "cache-first";
   return "passthrough";
 }

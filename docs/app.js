@@ -52,11 +52,13 @@ const networkDetails = document.querySelector(".network-details");
 const sideInputs = [...document.querySelectorAll("input[name='side']")];
 const modelInputs = [...document.querySelectorAll("input[name='model']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
+const archInputs = [...document.querySelectorAll("input[name='archModel']")];
 
 const APP_VERSION = "2026-06-16-v4";
 let state = null;
 let selectedSide = "white";
 let selectedModelId = "v3";
+let selectedArchId = "v3"; // which model's structure the diagram shows (independent of the loaded model)
 let overlayMode = "none";
 let busy = true;
 let cells = [];
@@ -78,15 +80,6 @@ const POLICY_HEAT = getComputedStyle(document.documentElement)
 const worker = new Worker(`./engine.worker.js?v=${APP_VERSION}`);
 
 const SIMULATION_OPTIONS = [16, 32, 64, 128, 256, 512, 1024, 2048];
-function networkDiagramConfig(model) {
-  const cfg = model && model.config ? model.config : {};
-  return {
-    channels: cfg.channels || 128,
-    blocks: cfg.residual_blocks || 8,
-    policyChannels: cfg.policy_channels || 12,
-    valueHidden: cfg.value_hidden || 384,
-  };
-}
 const playerName = (v) => (v === 1 ? "黑" : v === -1 ? "白" : "-");
 const pct = (v, digits = 0) => `${(v * 100).toFixed(digits)}%`;
 const moveText = (move) => (move ? `${move.row + 1},${move.col + 1}` : "-");
@@ -848,7 +841,6 @@ function render(nextState) {
   statusPill.textContent = state.status;
   statusPill.className = `status-pill ${state.winner !== null ? "done" : ""}`;
   undoBtn.disabled = !state.canUndo || busy;
-  if (networkDetails.open) initNetworkDiagram();
   requestLiveEvaluation();
 }
 
@@ -876,11 +868,6 @@ async function switchModel(modelId) {
   if (busy || modelId === selectedModelId) return;
   selectedModelId = modelId;
   resetAnalysisView();
-  renderedNetworkKey = "";
-  if (networkDiagram) {
-    networkDiagram.textContent = "网络结构图加载中";
-    networkDiagram.classList.remove("is-rendered", "diagram-error");
-  }
   let ok = false;
   try {
     setBusy(true, `加载 ${modelDisplayName(modelId)}`);
@@ -933,96 +920,31 @@ async function analyze() {
   });
 }
 
-function networkNode(x, y, w, h, title, subtitle) {
-  const g = svgEl("g", { class: "netnode", transform: `translate(${x} ${y})` });
-  g.appendChild(svgEl("rect", { x: 0, y: 0, width: w, height: h, rx: 8, ry: 8 }));
-  const titleText = svgEl("text", {
-    class: "netnode-title",
-    x: w / 2,
-    y: h / 2 - 6,
-    "text-anchor": "middle",
-  });
-  titleText.textContent = title;
-  const subText = svgEl("text", {
-    class: "netnode-sub",
-    x: w / 2,
-    y: h / 2 + 12,
-    "text-anchor": "middle",
-  });
-  subText.textContent = subtitle;
-  g.append(titleText, subText);
-  return g;
-}
-
-function networkEdge(x1, y1, x2, y2) {
-  return svgEl("line", {
-    class: "netedge",
-    x1,
-    y1,
-    x2,
-    y2,
-    "marker-end": "url(#netArrow)",
-  });
-}
+// The model-architecture diagram is a pre-rendered SVG, one per model
+// (scripts/render_architecture.py — stacked feature-map volumes with ResNet
+// skip connections). Switching model just swaps the <img>; each figure bakes
+// in that model's channel/block counts.
+const ARCH_DIAGRAM_IDS = new Set(["v1", "v3", "v4"]);
 
 function initNetworkDiagram() {
   if (!networkDiagram) return;
-  const model = state && state.model ? state.model : null;
-  const key = model ? `${model.id}:${model.iteration || ""}` : "unknown";
-  if (renderedNetworkKey === key && networkDiagram.classList.contains("is-rendered")) return;
-  const { channels, blocks, policyChannels, valueHidden } = networkDiagramConfig(model);
-
-  const W = 760;
-  const H = 240;
-  const svg = svgEl("svg", {
-    viewBox: `0 0 ${W} ${H}`,
-    class: "network-svg",
-    role: "img",
-    "aria-label": `网络结构：棋盘输入 → 卷积特征 ${channels} 通道 → 残差塔 ${blocks} 块 → 落点倾向 ${policyChannels} 通道与局面评估 hidden ${valueHidden} → MCTS`,
+  const id = selectedArchId;
+  if (renderedNetworkKey === id && networkDiagram.classList.contains("is-rendered")) return;
+  const slug = ARCH_DIAGRAM_IDS.has(id) ? id : "v3";
+  const img = new Image();
+  img.className = "network-figure";
+  img.decoding = "async";
+  img.alt = "网络结构示意：棋盘 2×10×10 输入 → 卷积干 → 残差塔（带跳连）→ 策略头 / 价值头";
+  img.addEventListener("error", () => {
+    networkDiagram.textContent = "结构图加载失败，可参考下方文字说明。";
+    networkDiagram.classList.add("diagram-error");
+    networkDiagram.classList.remove("is-rendered");
   });
-
-  const defs = svgEl("defs");
-  const marker = svgEl("marker", {
-    id: "netArrow",
-    viewBox: "0 0 10 10",
-    refX: 9,
-    refY: 5,
-    markerWidth: 7,
-    markerHeight: 7,
-    orient: "auto-start-reverse",
-  });
-  marker.appendChild(svgEl("path", { d: "M0,0 L10,5 L0,10 z", class: "netarrow" }));
-  defs.appendChild(marker);
-  svg.appendChild(defs);
-
-  const boxW = 116;
-  const boxH = 52;
-  const midY = (H - boxH) / 2;
-  const topY = 36;
-  const botY = H - boxH - 36;
-  const colX = [16, 172, 328, 500, 644];
-
-  const inputNode = networkNode(colX[0], midY, boxW, boxH, "棋盘输入", "黑 / 白两层");
-  const stemNode = networkNode(colX[1], midY, boxW, boxH, "卷积特征", `${channels} 通道`);
-  const towerNode = networkNode(colX[2], midY, boxW, boxH, "残差塔", `${blocks} 块`);
-  const policyNode = networkNode(colX[3], topY, boxW, boxH, "落点倾向", `${policyChannels} 通道头`);
-  const valueNode = networkNode(colX[3], botY, boxW, boxH, "局面评估", `hidden ${valueHidden}`);
-  const mctsNode = networkNode(colX[4], midY, boxW, boxH, "MCTS", "反复搜索");
-
-  svg.append(
-    networkEdge(colX[0] + boxW, midY + boxH / 2, colX[1], midY + boxH / 2),
-    networkEdge(colX[1] + boxW, midY + boxH / 2, colX[2], midY + boxH / 2),
-    networkEdge(colX[2] + boxW, midY + boxH / 2 - 8, colX[3], topY + boxH / 2),
-    networkEdge(colX[2] + boxW, midY + boxH / 2 + 8, colX[3], botY + boxH / 2),
-    networkEdge(colX[3] + boxW, topY + boxH / 2, colX[4], midY + boxH / 2 - 8),
-    networkEdge(colX[3] + boxW, botY + boxH / 2, colX[4], midY + boxH / 2 + 8),
-  );
-  svg.append(inputNode, stemNode, towerNode, policyNode, valueNode, mctsNode);
-
-  networkDiagram.replaceChildren(svg);
+  img.src = `./assets/diagrams/arch-${slug}.svg?v=${APP_VERSION}`;
+  networkDiagram.replaceChildren(img);
   networkDiagram.classList.add("is-rendered");
   networkDiagram.classList.remove("diagram-error");
-  renderedNetworkKey = key;
+  renderedNetworkKey = id;
 }
 
 function setOverlay(mode) {
@@ -1049,6 +971,14 @@ modelInputs.forEach((input) => {
 overlayInputs.forEach((input) => {
   input.addEventListener("change", () => {
     if (input.checked) setOverlay(input.value);
+  });
+});
+
+archInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    selectedArchId = input.value;
+    initNetworkDiagram();
   });
 });
 
@@ -1126,6 +1056,8 @@ async function boot() {
     if (catalog.defaultModel) {
       selectedModelId = catalog.defaultModel;
       modelInputs.forEach((input) => { input.checked = input.value === selectedModelId; });
+      selectedArchId = catalog.defaultModel;
+      archInputs.forEach((input) => { input.checked = input.value === selectedArchId; });
     }
   }
   try {
