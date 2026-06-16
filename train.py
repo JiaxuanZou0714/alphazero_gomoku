@@ -94,6 +94,13 @@ class TrainConfig:
     full_search_prob: float = 0.25      # probability of a full search per move when PCR is on
     fast_simulations: int = 0           # simulations for cheap searches (0 = simulations // 4)
     selfplay_tree_reuse: bool = True    # reuse the chosen subtree between self-play moves
+    # Opening diversity: start a fraction of self-play games from a few uniformly
+    # random legal plies (KataGo-style varied initialisation). Off by default so
+    # other presets/golden are unchanged. Diversifies positions for BOTH colors —
+    # an odd-length opening hands the model the white side — improving robustness
+    # to off-distribution / human play and narrowing the inherent first-move gap.
+    selfplay_opening_moves: int = 0     # max random opening plies (0 = off)
+    selfplay_opening_prob: float = 0.0  # fraction of games that get a random opening
     augment_symmetries: bool = True     # random dihedral symmetry per sample at train time
     replay_path: str = ""
     replay_save_interval: int = 5
@@ -430,6 +437,11 @@ PRESETS: dict[str, dict[str, object]] = {
         "mcts_value_weight": 0.25,
         "full_search_prob": 0.35,
         "fast_simulations": 56,
+        # Opening diversity: half the games start from 1-6 random plies so the
+        # model trains on varied (and white-to-move) positions, not just its own
+        # empty-board lines — more robust against human/off-distribution play.
+        "selfplay_opening_moves": 6,
+        "selfplay_opening_prob": 0.5,
         "use_ownership": True,        # KataGo dense per-cell auxiliary supervision
         "ownership_loss_weight": 0.15,
         "ema_decay": 0.9,            # ~10-iteration weight window; EMA is gated/promoted
@@ -884,6 +896,17 @@ def play_self_game(
     """
     mcts = MCTS(model, mcts_cfg, device=cfg.device)
     state = GomokuState.new(size=cfg.board_size, win_length=cfg.win_length)
+    # Opening diversity: with selfplay_opening_prob, start from a short random
+    # opening (1..selfplay_opening_moves plies). Those forced plies are NOT
+    # recorded as training examples — the model just plays on optimally from the
+    # resulting (often off-distribution) position. An odd opening length flips the
+    # side to move, so the model also self-plays from the white seat.
+    if cfg.selfplay_opening_moves > 0 and random.random() < cfg.selfplay_opening_prob:
+        n_open = random.randint(1, cfg.selfplay_opening_moves)
+        for action in _random_opening_plies(cfg.board_size, cfg.win_length, n_open, random):
+            if state.is_terminal:
+                break
+            state = state.apply(action)
     history: list[tuple[np.ndarray, np.ndarray, int, float, float]] = []
     entropies: list[float] = []
     kl_surprises: list[float] = []
@@ -1976,6 +1999,8 @@ def _log_run_config(cfg: TrainConfig) -> None:
         f"policy_channels={cfg.policy_channels} value_channels={cfg.value_channels} "
         f"value_hidden={cfg.value_hidden} use_se={cfg.use_se} "
         f"augment_symmetries={cfg.augment_symmetries} "
+        f"selfplay_opening_moves={cfg.selfplay_opening_moves} "
+        f"selfplay_opening_prob={cfg.selfplay_opening_prob} "
         f"eval_workers={cfg.eval_workers} "
         f"eval_devices={split_devices(cfg.eval_devices, cfg.device)} "
         f"amp={cfg.amp} amp_dtype={cfg.amp_dtype} mcts_amp_dtype={cfg.mcts_amp_dtype} "
@@ -2347,6 +2372,8 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--fast-simulations", type=int, default=defaults.fast_simulations)
     parser.add_argument("--selfplay-tree-reuse", dest="selfplay_tree_reuse", action="store_true")
     parser.add_argument("--no-selfplay-tree-reuse", dest="selfplay_tree_reuse", action="store_false")
+    parser.add_argument("--selfplay-opening-moves", type=int, default=defaults.selfplay_opening_moves)
+    parser.add_argument("--selfplay-opening-prob", type=float, default=defaults.selfplay_opening_prob)
     parser.add_argument("--policy-loss-weight", type=float, default=defaults.policy_loss_weight)
     parser.add_argument("--value-loss-weight", type=float, default=defaults.value_loss_weight)
     parser.add_argument("--learning-rate", type=float, default=defaults.learning_rate)

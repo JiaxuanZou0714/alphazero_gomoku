@@ -460,6 +460,34 @@ class V4PresetTest(unittest.TestCase):
         self.assertGreater(cfg.ema_decay, 0.0)
         self.assertTrue(cfg.resume_allow_partial)
         self.assertTrue(cfg.resume.endswith("v3-student-local/gomoku10_best.pt"))
+        # opening diversity is enabled for robustness against off-distribution play
+        self.assertGreater(cfg.selfplay_opening_moves, 0)
+        self.assertGreater(cfg.selfplay_opening_prob, 0.0)
+
+
+class SelfPlayOpeningTest(unittest.TestCase):
+    def test_random_opening_selfplay_runs(self) -> None:
+        """With opening diversity forced on, self-play still yields valid
+        post-opening examples (forced plies are not recorded)."""
+        torch.manual_seed(0)
+        random.seed(0)
+        model = tiny_model()
+        cfg = TrainConfig(
+            simulations=8, mcts_batch_size=2, board_size=10,
+            selfplay_opening_moves=6, selfplay_opening_prob=1.0, device="cpu",
+        )
+        mcfg = mcts_config_from_train(cfg, cfg.simulations)
+        examples, _kls, _stats = play_self_game(model, cfg, mcfg)
+        self.assertGreater(len(examples), 0)
+        for enc, _pol, val, _w in examples:
+            self.assertEqual(enc.shape, (2, 10, 10))
+            self.assertGreaterEqual(val, -1.0)
+            self.assertLessEqual(val, 1.0)
+
+    def test_opening_disabled_by_default(self) -> None:
+        cfg = TrainConfig()
+        self.assertEqual(cfg.selfplay_opening_moves, 0)
+        self.assertEqual(cfg.selfplay_opening_prob, 0.0)
 
 
 if __name__ == "__main__":
