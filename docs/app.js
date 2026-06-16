@@ -54,7 +54,7 @@ const modelInputs = [...document.querySelectorAll("input[name='model']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 const archInputs = [...document.querySelectorAll("input[name='archModel']")];
 
-const APP_VERSION = "2026-06-16-v4";
+const APP_VERSION = "2026-06-16-v6";
 let state = null;
 let selectedSide = "white";
 let selectedModelId = "v3";
@@ -1088,5 +1088,72 @@ async function boot() {
     loadLine.addEventListener("click", retry, { once: true });
   }
 }
+
+// Full iteration log shown in the version-history modal. Kept here (not fetched
+// from VERSION_HISTORY.md) so the static page needs no markdown renderer; the
+// modal footer links to the authoritative doc on GitHub. 🎯 entries shipped a model.
+const VERSION_TIMELINE = [
+  { n: 1, date: "06-11", title: "项目初始化", desc: "AlphaZero Gomoku 基础框架：10×10、self-play 强化学习、MCTS + policy-value 网络。" },
+  { n: 2, date: "06-12", title: "KataGo 式改进", desc: "引入 global pooling、soft policy head、dynamic cPUCT、MCTS value target、FPU、forced playouts；修根节点估值/防守点 bug 并补单测；评估加随机开局与胜率 early stopping。", model: { tag: "baseline", text: "🎯 v1 / old best — 192×12，A100 训 100 轮，正式基线" } },
+  { n: 3, date: "06-13", title: "全面中文化与文档", desc: "UI 全面中文化，README 补算法原理与自我对弈训练目标。" },
+  { n: 4, date: "06-14", title: "静态网页对弈 app", desc: "GitHub Pages 上线：浏览器内 onnxruntime-web（WebGPU/wasm）推理 + 浏览器端 MCTS，含搜索树可视化、分析面板、实时胜率。" },
+  { n: 5, date: "06-14", title: "v2 长训尝试", desc: "加 v2 preset 与远端启动脚本，从 old best 继续长训并调 replay / 步数 / 搜索预算。", model: { tag: "failed", text: "⚠️ v2 — 96→112 轮曲线退化，未稳超 old best，已归档" } },
+  { n: 6, date: "06-15", title: "轻量 student 蒸馏", desc: "用 old best 蒸馏 128×8 student（24 步 raw + 16 步 MCTS 微调），过最低准入 benchmark。", model: { tag: "seed", text: "🎯 distill seed — 轻量 student，后续 RL 的起点" } },
+  { n: 7, date: "06-15", title: "并行评估 infra 与稳定化", desc: "新增 eval-workers / eval-devices 等；eval 改多 worker 多 GPU 并行（20 局 9m37s→2m42s），checkpoint 原子替换。" },
+  { n: 8, date: "06-15", title: "v3 student 大规模 RL", desc: "从 seed 起 KataGo-style RL，每轮 96 盘 self-play、每 5 轮 champion gate，晋升第 90 轮。", model: { tag: "default", text: "🎯 v3-student — 128 sims 对 v1 为 54-10-0（0.844），网页默认模型" } },
+  { n: 9, date: "06-15", title: "网页多模型选择器", desc: "catalog.json + 选择器可在 v1/v3 间切换；新增网页版本记录页。" },
+  { n: 10, date: "06-16", title: "大型 infra 重构", desc: "共享 inference.py、PRESETS 字典化、self-play/eval 改 ProcessPoolExecutor（修 GIL/RNG）、多处 bug 修复；转 Linux-only。" },
+  { n: 11, date: "06-16", title: "GPU 训练循环提速", desc: "训练时 bf16 AMP + cuDNN autotune + 减少 per-batch 同步 + 向量化对称增广；3080 实测 1.61× 训练步加速。" },
+  { n: 12, date: "06-16", title: "KataGo 扩展：EMA 与 ownership 头", desc: "opt-in EMA-of-weights（gate 失败不回滚训练模型）与 ownership 辅助头（对称同步 + MSE 损失），默认关闭。" },
+  { n: 13, date: "06-16", title: "v4 训练：warm-start + 开局多样化", desc: "从 v3 additive-head warm-start，叠加 EMA / ownership / self-play 开局多样化，3080 RL 至晋升第 35 轮 EMA best。", model: { tag: "parity", text: "🎯 v4-student-3080 — 对 v3 33-27-0（0.550），黑白更均衡、更鲁棒，可选模型" } },
+  { n: 14, date: "06-16", title: "v4 上线网页 + 每模型架构图", desc: "v4 加入 catalog、版本面板展示；每模型 SVG 架构图与结构选择器；sw network-first + IndexedDB 按 sha256 失效。" },
+  { n: 15, date: "06-16", title: "网页推理 infra 提速", desc: "WebGPU 固定形状 batch + 预热消除首手 shader 编译延迟；v4 导出改 fp16，下载 11.95MB→6.0MB，落子与 fp32 100% 一致。" },
+];
+
+function setupVersionsDialog() {
+  const button = document.querySelector("#versionsButton");
+  const dialog = document.querySelector("#versionsDialog");
+  const closeBtn = document.querySelector("#versionsClose");
+  const list = document.querySelector("#versionsTimeline");
+  if (!button || !dialog || !list) return;
+
+  let rendered = false;
+  const render = () => {
+    if (rendered) return;
+    list.innerHTML = VERSION_TIMELINE.map((v) => {
+      const model = v.model
+        ? `<p class="vh-model"><em class="vh-tag">${v.model.tag}</em><span>${v.model.text}</span></p>`
+        : "";
+      return `<li class="vh-item">
+          <span class="vh-num">${v.n}</span>
+          <div class="vh-body">
+            <div class="vh-head"><strong>${v.title}</strong><time>2026-${v.date}</time></div>
+            <p class="vh-desc">${v.desc}</p>
+            ${model}
+          </div>
+        </li>`;
+    }).join("");
+    rendered = true;
+  };
+
+  const open = () => {
+    render();
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  };
+  const close = () => {
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+  };
+
+  button.addEventListener("click", open);
+  if (closeBtn) closeBtn.addEventListener("click", close);
+  // Click on the backdrop (the dialog element itself, outside its content) closes.
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) close();
+  });
+}
+
+setupVersionsDialog();
 
 boot();
