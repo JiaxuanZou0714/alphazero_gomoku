@@ -8,7 +8,7 @@
   color-scheme: dark;
 
   /* Surfaces — the void and the charcoal cards lit within it. */
-  --bg: #0a0a0b;
+  --bg: #050506;
   --bg-2: var(--bg-2);
   --surface: #141416;
   --surface-2: #191a1e;
@@ -32,7 +32,6 @@
   --line: rgba(255, 255, 255, 0.1);
   --line-strong: rgba(255, 255, 255, 0.2);
   --grid-line: rgba(255, 255, 255, 0.028);
-  --grid-tile: 34px;
 
   /* Brand: the Moonshot blue→teal accent system. */
   --accent: #2e8fff;
@@ -40,9 +39,6 @@
   --accent-soft: rgba(46, 143, 255, 0.16);
   --accent-2: #1fb6c9;
   --accent-grad: linear-gradient(135deg, #2e8fff 0%, #1fb6c9 100%);
-  --brand-grad: linear-gradient(118deg, #ffffff 28%, #6fb2ff 72%, #1fb6c9 100%);
-  --moon: rgba(46, 143, 255, 0.18);
-  --moon-2: rgba(31, 182, 201, 0.07);
 
   /* Semantic. Graphite for AI/policy ghosts; amber strictly on-board. */
   --ghost: #7a7390; /* fill only — fails AA as text */
@@ -90,16 +86,15 @@
 html {
   min-height: 100%;
   background: var(--bg);
+  scroll-behavior: smooth;
 }
 
+/* Pure black void — all real light is concentrated in the hero eclipse, not
+   sprayed across the page, so the chrome reads as Moonshot-style emptiness. */
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(1000px 540px at 14% -8%, var(--moon), transparent 60%),
-    radial-gradient(820px 460px at 94% 2%, var(--moon-2), transparent 58%),
-    linear-gradient(180deg, #0b0b0d 0, var(--bg) 320px, var(--bg-2) 100%);
-  background-attachment: fixed;
+  background: var(--bg);
   color: var(--body);
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
   letter-spacing: 0;
@@ -107,18 +102,14 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Faint Go-grid star-field, fading toward the center so it never fights the board. */
+/* A single faint cool wash at the very top seats the content in the void. */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / var(--grid-tile) var(--grid-tile),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / var(--grid-tile) var(--grid-tile);
-  -webkit-mask: radial-gradient(80% 70% at 50% 30%, transparent, #000 90%);
-  mask: radial-gradient(80% 70% at 50% 30%, transparent, #000 90%);
+  background: radial-gradient(110% 70% at 50% -14%, rgba(46, 143, 255, 0.08), transparent 56%);
 }
 
 button,
@@ -237,92 +228,169 @@ summary:focus-visible,
   min-height: calc(100vh - 36px);
 }
 
-/* --- Topbar / hero --------------------------------------------------------- */
+/* --- Hero (cinematic Moonshot-style band) ---------------------------------- */
 
-.topbar {
+.hero {
   position: relative;
   isolation: isolate;
   overflow: hidden;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 44px;
+  min-height: 100vh;
+  min-height: 100svh; /* full-viewport landing — the board sits below the fold */
+  padding: 72px 20px 48px;
+  text-align: center;
+  background: var(--bg);
+}
+
+/* The luminous eclipse ring — the single focal light in the void. */
+.hero-eclipse {
+  position: absolute;
+  top: 47%;
+  left: 50%;
+  width: clamp(190px, 26vw, 320px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  z-index: 0;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow:
+    inset 0 0 1px 1px rgba(255, 255, 255, 0.06),
+    0 0 30px 2px rgba(150, 185, 255, 0.22),
+    0 0 120px 30px rgba(46, 143, 255, 0.14);
+}
+
+/* Bright crescent of light along the lower rim (the eclipse highlight). */
+.hero-eclipse::after {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 50%;
+  background: radial-gradient(125% 125% at 50% 122%,
+    rgba(255, 255, 255, 0.95) 0 5%,
+    rgba(170, 200, 255, 0.55) 8.5%,
+    transparent 15%);
+  filter: blur(0.4px);
+}
+
+/* Faint scanline shimmer (lens/CRT texture), masked to the center. */
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 3px);
+  -webkit-mask: radial-gradient(70% 60% at 50% 47%, #000, transparent 78%);
+  mask: radial-gradient(70% 60% at 50% 47%, #000, transparent 78%);
+}
+
+.hero-title,
+.hero-cta {
+  position: relative;
+  z-index: 1;
+}
+
+/* Wordmark — the canvas paints it when live; this is the static fallback. */
+.hero-title {
+  margin: 0;
+  font-size: clamp(46px, 9vw, 104px);
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #eef1f6;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.25), 0 0 30px rgba(120, 170, 255, 0.28);
+}
+
+.hero-cta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 54px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--body);
+  padding: 15px 32px;
+  font-size: 16px;
+  font-weight: 650;
+  text-decoration: none;
+  transition:
+    border-color var(--dur) var(--ease-out),
+    background-color var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out);
+}
+
+.pill:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.42);
+  background: var(--tint-strong);
+}
+
+.pill.primary-pill {
+  border-color: transparent;
+  background: var(--accent-grad);
+  color: #fff;
+  box-shadow: var(--glow-accent);
+}
+
+.pill.primary-pill:hover {
+  box-shadow: 0 0 0 1px rgba(46, 143, 255, 0.55), 0 10px 32px rgba(31, 182, 201, 0.4);
+}
+
+/* The character-art canvas (hero.js) paints the wordmark + big glow; when it's
+   live we hide the static CSS fallback. No-JS / reduced-motion keeps the static
+   .hero-eclipse + .hero-title below. */
+.hero-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hero--bg .hero-eclipse,
+.hero--bg::after {
+  display: none;
+}
+
+.hero--bg .hero-title {
+  opacity: 0; /* kept for layout + screen readers; the canvas paints it */
+  /* Reserve a tall centerpiece band so the CTA below clears the eclipse ring. */
+  height: clamp(380px, 48vh, 520px);
+}
+
+/* --- Topbar (slim in-app status bar) --------------------------------------- */
+
+.topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  background: linear-gradient(180deg, #16161a, #0f0f12);
-  padding: 22px 24px;
+  background: var(--surface);
+  padding: 12px 16px;
   box-shadow: var(--shadow-soft);
 }
 
-/* Off-center blue moon-glow behind the headline's left shoulder. */
-.topbar::before {
-  content: "";
-  position: absolute;
-  inset: -40% 40% auto -12%;
-  height: 420px;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 30% 30%, var(--moon), transparent 62%),
-    radial-gradient(circle at 60% 40%, var(--moon-2), transparent 66%);
-}
-
-/* Faint Go-grid star-field inside the hero. */
-.topbar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / var(--grid-tile) var(--grid-tile),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / var(--grid-tile) var(--grid-tile);
-}
-
-.topbar > * {
-  position: relative;
-  z-index: 1;
-}
-
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0 0 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-pill);
-  background: var(--surface-2);
-  padding: 4px 12px 4px 10px;
-  color: var(--soft);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.eyebrow::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--accent-grad);
-  box-shadow: 0 0 0 3px var(--accent-soft), 0 0 8px rgba(46, 143, 255, 0.5);
-}
-
-.topbar h1 {
+.topbar-label {
   margin: 0;
-  font-size: clamp(40px, 6vw, 60px);
-  line-height: 1.02;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  text-wrap: balance;
-  background: var(--brand-grad);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.nowrap {
-  white-space: nowrap;
+  color: var(--soft);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .status-pill {
@@ -1943,11 +2011,6 @@ summary:focus-visible,
     padding: 12px;
   }
 
-  .topbar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
   .load-line {
     grid-template-columns: auto minmax(0, 1fr);
     grid-template-areas:
@@ -1960,12 +2023,12 @@ summary:focus-visible,
     justify-self: start;
   }
 
-  .topbar h1 {
-    font-size: clamp(28px, 8.8vw, 34px);
+  .hero {
+    padding: 56px 18px 40px;
   }
 
-  .nowrap {
-    white-space: normal;
+  .hero-title {
+    font-size: clamp(36px, 13vw, 60px);
   }
 
   .board-area {

@@ -9,13 +9,18 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="app-shell">
+    <header class="hero" aria-label="AlphaZero 五子棋">
+      <div class="hero-eclipse" aria-hidden="true"></div>
+      <h1 class="hero-title">AlphaZero 五子棋</h1>
+      <div class="hero-cta">
+        <a class="pill primary-pill" href="#play">开始对局 ↓</a>
+        <a class="pill" href="https://github.com/JiaxuanZou0714/alphazero_gomoku" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </header>
+    <main class="app-shell" id="play">
       <section class="board-pane" aria-label="棋盘">
         <div class="topbar">
-          <div>
-            <p class="eyebrow">浏览器 AlphaZero · 10×10 Gomoku</p>
-            <h1>AlphaZero <span class="nowrap">五子棋</span></h1>
-          </div>
+          <p class="topbar-label">实时对局</p>
           <div class="status-pill loading" id="statusPill" role="status" aria-live="polite">加载模型</div>
         </div>
 
@@ -252,6 +257,7 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <script src="./hero.js" defer></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

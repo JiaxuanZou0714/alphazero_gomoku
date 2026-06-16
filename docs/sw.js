@@ -11,7 +11,7 @@
  *     them against the manifest sha256 and persists the assembled bytes in IndexedDB,
  *     so SW-caching them too would just double-store ~tens of MB per model.
  * Bump CACHE_VERSION to roll the shell/vendor cache when those assets change. */
-const CACHE_VERSION = "az-gomoku-v13";
+const CACHE_VERSION = "az-gomoku-v23";
 
 // Resolve relative to the worker scope so it works under the GitHub Pages
 // subpath (e.g. /alphazero_gomoku/).
@@ -22,6 +22,7 @@ const APP_SHELL = [
   rel("./"),
   rel("./index.html"),
   rel("./app.js"),
+  rel("./hero.js"),
   rel("./engine.worker.js"),
   rel("./styles.css"),
 ];
