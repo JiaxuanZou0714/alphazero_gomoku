@@ -248,12 +248,6 @@ h1 {
   grid-area: mark;
 }
 
-.compute-mark {
-  width: 24px;
-  height: 24px;
-  background: transparent;
-}
-
 .activity-mark::before,
 .compute-mark::before {
   content: "";
@@ -263,11 +257,6 @@ h1 {
   border-top-color: var(--accent-2);
   border-radius: inherit;
   animation: computeSpin 900ms linear infinite;
-}
-
-.compute-mark::before {
-  border-color: rgba(47, 116, 110, 0.18);
-  border-top-color: var(--accent-2);
 }
 
 .load-copy {
@@ -628,7 +617,7 @@ h1 {
 }
 
 .model-seg {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: 10px;
 }
 
@@ -637,7 +626,6 @@ h1 {
   display: grid;
   place-items: center;
   min-height: 44px;
-  border-color: transparent;
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
@@ -1644,6 +1632,26 @@ li {
 
   dl {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .model-seg {
+    grid-template-columns: 1fr;
+  }
+
+  .model-option {
+    grid-template-columns: auto 1fr;
+    justify-items: start;
+    min-height: 44px;
+    text-align: left;
+  }
+
+  .model-option span,
+  .model-option small {
+    width: auto;
+  }
+
+  .model-option small {
+    justify-self: end;
   }
 
   .tree-legend strong {
