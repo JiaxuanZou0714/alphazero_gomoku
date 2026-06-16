@@ -134,6 +134,12 @@ python scripts/plot_training_metrics.py \
 
 诊断要点：replay 达标后训练才真正开始；真实训练阶段 loss 和 policy KL 整体下降；eval 波动大，不能只靠曲线晋升。
 
+### v4 / warm-start + ownership/EMA
+
+![v4 training overview](outputs/plots/v4-student-3080/metrics_overview.png)
+
+v4 是 v3（`128x8`）的 warm-start 续训，打开 ownership 辅助头 + EMA-of-weights + bf16 AMP，并用开局多样化（`selfplay_opening_*`）让自我对弈不再总从空盘开始。本地 3080 训到第 `56` 轮在平台期停住，best = 第 `35` 轮 EMA 快照。诊断要点：因为 warm-start，曲线一开始就接近收敛（不像从零训那样有长前摇）；右下自我对弈黑/白胜率收敛到约 `0.58 / 0.42`，比 v3 的 `0.69 / 0.31` 更均衡——这是开局多样化带来的鲁棒性，**不是**消除了五子棋固有的先手优势。head-to-head 与 v3 持平（`33-27-0`，score `0.550`），故 v3 仍是网页默认，v4 作为可选项发布。
+
 ## 测试
 
 装好包后（`pip install -e .`）直接：
