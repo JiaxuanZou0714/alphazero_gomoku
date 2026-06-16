@@ -85,6 +85,15 @@ def main() -> None:
     parser.add_argument("--opset", type=int, default=17)
     parser.add_argument("--chunk-mib", type=int, default=24)
     parser.add_argument(
+        "--fp16",
+        action="store_true",
+        help=(
+            "Convert the ONNX weights to float16 (keeps float32 graph I/O so the "
+            "browser worker needs no change). Roughly halves the download and lets "
+            "the WebGPU backend run fp16 kernels."
+        ),
+    )
+    parser.add_argument(
         "--keep-onnx",
         action="store_true",
         help="Keep the full ONNX file beside the GitHub-friendly chunks.",
@@ -143,6 +152,20 @@ def main() -> None:
         do_constant_folding=True,
     )
 
+    precision = "float32"
+    if args.fp16:
+        import onnx
+        # onnxruntime's converter (vs onnxconverter_common) handles the value
+        # head's internal Cast node cleanly; the latter produces a graph ORT
+        # refuses to load. keep_io_types=True leaves "board"/outputs as float32
+        # so engine.worker.js still feeds and reads float32 tensors unchanged.
+        from onnxruntime.transformers.float16 import convert_float_to_float16
+
+        model_fp16 = convert_float_to_float16(onnx.load(str(onnx_path)), keep_io_types=True)
+        onnx.save(model_fp16, str(onnx_path))
+        precision = "float16"
+        print("converted ONNX weights to float16 (fp32 graph I/O preserved)")
+
     chunk_size = args.chunk_mib * 1024 * 1024
     chunks = split_file(onnx_path, out_dir, chunk_size)
     manifest = {
@@ -151,6 +174,7 @@ def main() -> None:
         "label": args.model_label or model_id,
         "model": onnx_path.name,
         "storage": "chunks",
+        "precision": precision,
         "bytes": onnx_path.stat().st_size,
         "sha256": sha256_file(onnx_path),
         "chunkSize": chunk_size,

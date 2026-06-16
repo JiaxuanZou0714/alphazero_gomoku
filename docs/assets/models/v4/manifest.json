@@ -4,14 +4,15 @@
   "label": "v4 student",
   "model": "gomoku10_best.onnx",
   "storage": "chunks",
-  "bytes": 11952694,
-  "sha256": "ea342cbb4365cee3ffb749c3073b647c76b9dd82cff09692e908a7c4a082018f",
+  "precision": "float16",
+  "bytes": 6002646,
+  "sha256": "bd168e1cc2bff4d1ed66559bb1b057b3efdfac99f10627a3df174f71cacf72b5",
   "chunkSize": 25165824,
   "chunks": [
     {
       "file": "gomoku10_best.onnx.part00",
-      "bytes": 11952694,
-      "sha256": "ea342cbb4365cee3ffb749c3073b647c76b9dd82cff09692e908a7c4a082018f"
+      "bytes": 6002646,
+      "sha256": "bd168e1cc2bff4d1ed66559bb1b057b3efdfac99f10627a3df174f71cacf72b5"
     }
   ],
   "checkpoint": "outputs/checkpoints/v4-student-3080/gomoku10_best.pt",

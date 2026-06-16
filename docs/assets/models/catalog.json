@@ -28,7 +28,7 @@
       "label": "v4 student",
       "manifest": "v4/manifest.json",
       "iteration": 35,
-      "bytes": 11952694,
+      "bytes": 6002646,
       "arch": {
         "channels": 128,
         "residual_blocks": 8

@@ -9,6 +9,21 @@ let modelCatalog = null;
 const sessionCache = new Map();
 let game = null;
 
+/* Fixed-shape batching for WebGPU: the EP JIT-compiles a fresh compute pipeline
+ * for every distinct input batch dimension it sees, so a search that runs
+ * batches of 32, 32, …, 8, plus singleton expand/evaluate calls, pays repeated
+ * shader recompiles. We pad every multi-leaf batch up to `evalPad` so the GPU
+ * only ever sees two shapes (1 and evalPad); padded rows are zero-filled empty
+ * boards and discarded. The wasm backend recompiles nothing, so padding there
+ * would only waste CPU — gate it on the backend. */
+let evalPad = 1;
+let padEnabled = false;
+
+function configureEvalShape() {
+  evalPad = Math.max(1, Math.min(Number((modelConfig && modelConfig.mcts_batch_size) ?? 16), 64));
+  padEnabled = !!(activeModel && activeModel.backend === "webgpu");
+}
+
 function sendProgress(label, loaded, total) {
   self.postMessage({ type: "progress", payload: { label, loaded, total } });
 }
@@ -385,10 +400,15 @@ class BrowserMCTS {
 async function evaluateBatch(states, rootTemp = 1.0) {
   const n = states.length;
   const actionSize = 100;
-  const encoded = new Float32Array(n * 2 * actionSize);
+  // Pad multi-leaf batches up to evalPad so WebGPU only compiles two shapes
+  // (1 and evalPad). Rows [n, padN) stay zero-filled (empty board) and the
+  // output loop below reads only the real rows, so per-sample results are
+  // unaffected (BN runs on frozen running stats, so batch composition is inert).
+  const padN = padEnabled && n > 1 && n < evalPad ? evalPad : n;
+  const encoded = new Float32Array(padN * 2 * actionSize);
   for (let i = 0; i < n; i += 1) states[i].encodeInto(encoded, i * 2 * actionSize);
 
-  const input = new ort.Tensor("float32", encoded, [n, 2, 10, 10]);
+  const input = new ort.Tensor("float32", encoded, [padN, 2, 10, 10]);
   const outputs = await session.run({ board: input });
   const logits = outputs.policy_logits.data;
   const values = outputs.value.data;
@@ -951,6 +971,7 @@ async function loadModel(modelId = null) {
     session = cached.session;
     modelConfig = cached.modelConfig;
     activeModel = cached.activeModel;
+    configureEvalShape();
     game = new GameSession(modelConfig, activeModel);
     sendProgress(`${activeModel.label} 已缓存`, 1, 1);
     return;
@@ -979,8 +1000,29 @@ async function loadModel(modelId = null) {
     backend = "wasm";
   }
   activeModel = { ...meta, backend };
+  configureEvalShape();
+  await warmupSession();
   sessionCache.set(activeModel.id, { session, modelConfig, activeModel });
   game = new GameSession(modelConfig, activeModel);
+}
+
+/* Pre-compile the WebGPU pipelines for both batch shapes (1 and evalPad) on a
+ * throwaway empty board so the user's first move doesn't pay shader-compile
+ * latency. Best-effort: any failure here is non-fatal. */
+async function warmupSession() {
+  if (!padEnabled) return;
+  try {
+    const probe = GomokuState.new(
+      Number(modelConfig.board_size ?? 10),
+      Number(modelConfig.win_length ?? 5),
+    );
+    await evaluateBatch([probe]);
+    if (evalPad > 1) {
+      await evaluateBatch(new Array(evalPad).fill(probe));
+    }
+  } catch (error) {
+    /* warmup is best-effort; real inference will compile on demand */
+  }
 }
 
 /* Returns the assembled model bytes, preferring a verified IndexedDB hit keyed
