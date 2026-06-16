@@ -2,85 +2,70 @@
 
 最后更新：2026-06-16
 
-本文只记录训练版本和基础设施版本，不记录普通代码提交。每个版本统一使用以下字段：
+按时间顺序记录每一次迭代——不断改进**训练逻辑、模型架构、基础设施、网页前端**。编号递增、最新在下；🎯 标记带模型产出的里程碑。
 
-- 状态
-- 目标
-- 起点/产物
-- 关键改动
-- 结果
-- 结论
+---
 
-## v1 / old best
+### 1. 项目初始化 · 2026-06-11
+AlphaZero Gomoku 基础框架：10×10 棋盘、self-play 强化学习、MCTS + policy-value 网络。
 
-- 状态：`baseline`
-- 目标：建立当前最强的已验证基线模型。
-- 起点/产物：`outputs/checkpoints/v1-old-best/gomoku10_best.pt`（晋升的是第 `95` 轮的 best，共训练 `100` 轮）
-- 关键改动：A100 训练 `100` 轮，中间 resume 两次；使用较大的 `192x12` 网络；引入 global context、soft policy head、MCTS value target、dynamic cPUCT、FPU、forced playouts、playout cap randomization 等 KataGo-style 改进。
-- 结果：成为后续所有实验的默认比较对象。
-- 结论：继续作为正式 baseline，除非新模型通过足够大的 head-to-head 评估。（历史目录名曾为 `a100-4-prod-v3`，已重命名为 `v1-old-best` 以消除与 v3 的混淆。）
+### 2. KataGo 式改进 · 2026-06-12
+MCTS 与网络引入 global pooling、辅助 soft policy head、dynamic cPUCT、MCTS value target、FPU、forced playouts、playout cap randomization；修复根节点估值符号、FPU 冻结防守点等 bug 并补单元测试；评估加随机开局与胜率 early stopping。
+🎯 **模型产出 · v1 / old best**：`192x12` 网络，A100 训 `100` 轮（晋升第 `95` 轮),成为后续所有实验的正式基线。
 
-## v2
+### 3. 全面中文化与文档 · 2026-06-13
+UI 全面中文化，README 补充算法原理与自我对弈训练目标。
 
-- 状态：`failed`
-- 目标：从 old best 继续长训，尝试超过旧基线。
-- 起点/产物：`outputs/checkpoints/v2/`、`outputs/metrics/v2.jsonl`、`outputs/plots/v2-failed/`
-- 关键改动：延长训练，并调整 replay、训练步数和搜索预算。
-- 结果：`96 -> 112` 轮曲线恶化，表现为 `loss` 上升、`policy_top1/value_acc` 下降、`policy_kl` 变差；对战复核也没有稳定超过 old best。
-- 结论：判定失败。保留 v2-failed 分析产物，不继续作为主线。
+### 4. 静态网页对弈 app · 2026-06-14
+GitHub Pages 上线：浏览器内 onnxruntime-web（WebGPU/wasm）推理 + 浏览器端 MCTS；含搜索树可视化、分析/推荐面板、实时胜率追踪；模型用 Git LFS 跟踪。
 
-## v3-local
+### 5. v2 长训尝试 · 2026-06-14
+加 v2 preset 与远端启动脚本，从 old best 继续长训并调 replay / 步数 / 搜索预算。
+⚠️ **模型产出 · v2（失败）**：`96 -> 112` 轮曲线恶化（`loss` 升、`top1`/`value_acc` 降），未稳超 old best，判废，仅留分析产物。
 
-- 状态：`archived`
-- 目标：保留本地从 old best 直接继续训练的复现路径。
-- 起点/产物：`--preset v3-local`
-- 关键改动：使用 v3 的训练配置直接从 old best 继续 RL。
-- 结果：不是当前推荐路线。
-- 结论：仅用于复现或对比；新实验优先走 distill -> student RL。
+### 6. 轻量 student 蒸馏 · 2026-06-15
+用 old best 蒸馏出 `128x8` student（policy `12`/value `6`/value_hidden `384`），`24` 步 raw distill + `16` 步 MCTS 微调，过最低准入 benchmark。
+🎯 **模型产出 · distill seed**：轻量 student，作为后续 RL 的起点，降低训练成本。
 
-## distill-oldbest-128x8
+### 7. 并行评估 infra 与训练稳定化 · 2026-06-15
+新增 `--eval-workers`/`--eval-devices`/`--train-data-workers` 等；eval 改多 worker 多 GPU 并行（`20` 局 `9m37s -> 2m42s`），checkpoint/best/replay 改原子替换；修首轮空 loader、Windows 临时目录竞争。
 
-- 状态：`active seed`
-- 目标：用 old best 蒸馏一个更轻的 student，降低后续 RL 成本。
-- 起点/产物：`outputs/checkpoints/distill-oldbest-128x8/gomoku10_student_best.pt`
-- 关键改动：student 使用 `128` channels、`8` residual blocks、`12` policy channels、`6` value channels、`384` value hidden，并保留 global pooling 和 soft policy head。
-- 结果：前 `24` 步 raw distill，后 `16` 步 MCTS fine-tune；末尾 `policy_top1 ~= 0.712`、`policy_kl ~= 0.509`、`value_mae ~= 0.120`。通过最低准入 benchmark，作为 v3 student RL 的起点。
-- 结论：保留为当前 student 主线的 seed。
+### 8. v3 student 大规模 RL · 2026-06-15
+从 distill seed 起 KataGo-style RL：每轮 `96` 盘 self-play、replay `25k` 起训、每 5 轮 champion gate，晋升第 `90` 轮。
+🎯 **模型产出 · v3-student**：`128 sims` 对 v1 复核 **`54-10-0`（`0.844`）**，明显超 old best，成为**网页默认模型**。
 
-## v3-student-local
+### 9. 网页多模型选择器 · 2026-06-15
+`catalog.json` + 选择器，可在 v1/v3 间切换；新增网页版本记录页。
 
-- 状态：`active`
-- 目标：让轻量 student 进入大规模 KataGo-style RL，尝试超过 old best。
-- 起点/产物：`--preset v3-student-local`、`outputs/checkpoints/v3-student-local/`。本地训练指标写入 `outputs/metrics/v3-student-local.jsonl`；远端 A100 跑出的同一 preset 曲线归档在 `outputs/metrics/v3-student-a100-final.jsonl` 与 `outputs/plots/v3-student-a100-final/`（README 展示的就是这份远端曲线，对应的冠军即 `v3-student-local/gomoku10_best.pt`）。
-- 关键改动：从 `distill-oldbest-128x8` 启动；每轮 `96` 盘 self-play；replay 达到 `25k` 原始局面后开始训练；每轮最多扫 replay `2` 遍；每 5 轮做 champion gate eval。
-- 结果：基础设施优化后训练流程健康；`gomoku10_best.pt` 对应第 `90` 轮。对 v1 / old best 的 `128 sims` 复核为 `54-10-0`，score `0.84375`。
-- 结论：当前主线，已在 `128 sims` 设置下明显超过 old best；正式替代前仍建议补更高 sims 和更大样本评估。
+### 10. 大型 infra 重构 · 2026-06-16
+共享 `inference.py`、`PRESETS` 字典化、self-play/eval 改 `ProcessPoolExecutor`（修 GIL 无并行 + 全局 RNG 污染）、`eval_cache` FIFO、`value_acc` 加权 bug 修复、`train_epoch` 拆分；弃用 Windows 专用代码转为 Linux-only。
 
-## v3-infra-20260615
+### 11. GPU 训练循环提速 · 2026-06-16
+训练时 bf16 AMP + cuDNN autotune + 减少 per-batch 同步 + 向量化对称增广；3080 实测 **`1.61x`** 训练步加速，CPU 结果不变。
 
-- 状态：`infra adopted`
-- 目标：解决 eval 阶段串行导致的 A100 时间浪费，并提高长训可靠性。
-- 起点/产物：`train.py` infra revision；远端新日志 `v3_student_a100_gpu23_newinfra_*.out.log`
-- 关键改动：新增 `--eval-workers`、`--eval-devices`、`--train-data-workers`、`--train-prefetch-factor`；eval 改为多 worker 多 GPU 并行；self-play/eval 临时快照自动清理；checkpoint、best checkpoint、replay 改为临时文件写入后原子替换。
-- 结果：旧串行 eval 约 `8/20` 局耗时 `9m37s`；新并行 eval `20/20` 局耗时约 `2m42s`。重启后前几轮 `skipped=0`、`value_clamps=0`。
-- 结论：后续 A100 训练默认使用这套 infra。
+### 12. KataGo 扩展：EMA 与 ownership 头 · 2026-06-16
+opt-in EMA-of-weights（评估/晋升/存 best 用 EMA 快照，gate 失败不回滚训练模型）与 ownership 辅助头（对称增广同步变换 + MSE 损失）；默认关闭以保持 CPU 结果一致。
 
-## v4-student-3080
+### 13. v4 训练：warm-start + 开局多样化 · 2026-06-16
+从 v3 additive-head warm-start（`resume_allow_partial` 只随机初始化 ownership 头、走全新 schedule），叠加 EMA、ownership、self-play 开局多样化，本地 3080 RL 至晋升第 `35` 轮 EMA best。
+🎯 **模型产出 · v4-student-3080**：对 v3 `60` 局 @`256 sims` 为 **`33-27-0`（`0.550`，噪声区内）**，但黑白更均衡、对非常规开局更鲁棒；已上线为**可选模型**，v3 仍默认。
 
-- 状态：`active（与 v3 基本持平，已上线为可选模型）`
-- 目标：在 v3 student 之上叠加 KataGo 的 ownership 辅助头 + EMA-of-weights，并新增 self-play 开局多样化，用本地 RTX 3080 继续 RL；重点改善对人类/非常规开局（尤其执白后手）的鲁棒性。
-- 起点/产物：`--preset v4-student-3080`，warm-start 自 `v3-student-local/gomoku10_best.pt`。两者同构（`128x8`），v4 仅新增 ownership 头，故用 `resume_allow_partial` 复用共享塔、只随机初始化新头，并重置迭代/优化器走全新 schedule。产物 `outputs/checkpoints/v4-student-3080/gomoku10_best.pt`（晋升的是第 `35` 轮的 EMA best），指标 `outputs/metrics/v4-student-3080.jsonl`，对战记录 `outputs/metrics/v4_vs_v3_benchmark.jsonl`。
-- 关键改动：opt-in ownership 辅助头（`ownership_loss_weight=0.15`）；EMA（`ema_decay=0.9`，被评估/晋升/保存为 best 的是 EMA 快照，gate 失败不回滚训练模型）；train-time bf16 AMP；self-play 开局多样化（`selfplay_opening_moves=6`、`selfplay_opening_prob=0.5`：半数对局以 1-6 步随机合法开局起步，奇数步让模型执白）。3080 上 3 self-play worker（实测多于 3 个反而更慢，单 GPU kernel 争用），~2.3 min/轮；replay 达 `4k` 后第 4 轮起训练，每 5 轮做 gate（`16` 局 @`128` sims）。
-- 结果：训练健康（`loss 8.97 -> 7.9`、`value_acc 0.86 -> 0.916`、`policy_top1 0.55 -> 0.68`），共晋升 `4` 次（iter `10/25/30/35`），第 `56` 轮在连续 4 次未晋升的平台期手动停止（cosine 尾段收益递减）。对 v3 的 head-to-head（`60` 局 @`256` sims、随机开局、黑白互换）为 **`33-27-0`，score `0.550`**；分色：执黑 `17-13`（`0.567`）、执白 `16-14`（`0.533`）——执白后手并不吃亏。self-play 黑/白胜率也从 v3 的 `~0.69/0.31` 收窄到 `~0.58/0.42`。
-- 结论：与 v3 **基本持平**（`0.55` 落在 60 局噪声区间内，未达到“明显超过”的晋升门槛），但黑白更均衡、对非常规开局更鲁棒，并验证了 ownership/EMA/开局多样化三项改动可正常训练。按晋升规则 v3 仍是网页**默认**；v4 已加入 `catalog.json` 可在网页选择。若更看重鲁棒性，把 `catalog.json` 的 `defaultModel` 改为 `v4` 即可（网页选择器与 worker 回退目录均已包含 v4）。
+### 14. v4 上线网页 + 每模型架构图 · 2026-06-16
+v4 加入 `catalog.json`、版本面板展示；新增每模型 SVG 架构图与结构选择器；前端审查修复（sw 改 manifest/catalog network-first、`*.onnx.part*` 交 IndexedDB 按 `sha256` 失效）。
+
+### 15. 网页推理 infra 提速 · 2026-06-16
+WebGPU 固定形状 batch + 加载预热，消除首手 shader 编译延迟（仅 WebGPU，wasm 路径不变）；v4 导出改 **fp16**（权重半精度、I/O 仍 float32，worker 不变），下载 `11.95MB -> 6.0MB`，policy argmax 与 fp32 `100%` 一致。
+
+---
 
 ## checkpoint 晋升规则
 
-新 checkpoint 只有同时满足以下条件，才可以替代 `v1 / old best`：
+新 checkpoint 只有同时满足以下条件，才可替代 `v1 / old best`：
 
-1. 通过训练内 champion gate。
-2. 单独对 old best 做 head-to-head 评估。
-3. 随机开局和黑白互换下结果稳定。
-4. 曲线没有明显退化，重点看 `policy_kl`、`policy_top1`、`value_acc` 和 value 稳定性。
+1. 通过训练内 champion gate；
+2. 单独对 old best 做 head-to-head 评估；
+3. 随机开局和黑白互换下结果稳定；
+4. 曲线没有明显退化（重点看 `policy_kl`、`policy_top1`、`value_acc` 和 value 稳定性）。
 
 在这些条件满足之前，`v1 / old best` 仍是正式 baseline。
+</content>
