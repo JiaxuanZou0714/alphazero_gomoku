@@ -54,7 +54,7 @@ const modelInputs = [...document.querySelectorAll("input[name='model']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 const archInputs = [...document.querySelectorAll("input[name='archModel']")];
 
-const APP_VERSION = "2026-06-17-v7";
+const APP_VERSION = "2026-06-17-v8";
 let state = null;
 let selectedSide = "white";
 let selectedModelId = "v5";
