@@ -397,25 +397,56 @@ class BrowserMCTS {
   }
 }
 
+/* Transposition / eval cache: the network output depends only on the board +
+ * side-to-move (the encode is canonical), so positions reached by different move
+ * orders share an evaluation. Gomoku produces many such transpositions within a
+ * single search, so caching skips the NN (and a GPU round-trip) for repeats.
+ * Results are READ-only in the MCTS (expand/backprop never mutate policy/value),
+ * so a cached object can be safely shared across hits. Cleared on model switch
+ * (loadModel) since a different net gives different outputs. Bounded FIFO. */
+const evalCache = new Map();
+const EVAL_CACHE_MAX = 20000;
+
+function evalCacheKey(state, rootTemp) {
+  return `${rootTemp}|${state.currentPlayer}|${Array.from(state.board).join(",")}`;
+}
+
 async function evaluateBatch(states, rootTemp = 1.0) {
   const n = states.length;
   const actionSize = 100;
+  const results = new Array(n);
+  const missIdx = [];
+  const missStates = [];
+  const missKeys = [];
+  for (let i = 0; i < n; i += 1) {
+    const key = evalCacheKey(states[i], rootTemp);
+    const hit = evalCache.get(key);
+    if (hit !== undefined) {
+      results[i] = hit;
+    } else {
+      missIdx.push(i);
+      missStates.push(states[i]);
+      missKeys.push(key);
+    }
+  }
+  if (missStates.length === 0) return results;
+
+  const m = missStates.length;
   // Pad multi-leaf batches up to evalPad so WebGPU only compiles two shapes
-  // (1 and evalPad). Rows [n, padN) stay zero-filled (empty board) and the
+  // (1 and evalPad). Rows [m, padN) stay zero-filled (empty board) and the
   // output loop below reads only the real rows, so per-sample results are
   // unaffected (BN runs on frozen running stats, so batch composition is inert).
-  const padN = padEnabled && n > 1 && n < evalPad ? evalPad : n;
+  const padN = padEnabled && m > 1 && m < evalPad ? evalPad : m;
   const encoded = new Float32Array(padN * 2 * actionSize);
-  for (let i = 0; i < n; i += 1) states[i].encodeInto(encoded, i * 2 * actionSize);
+  for (let i = 0; i < m; i += 1) missStates[i].encodeInto(encoded, i * 2 * actionSize);
 
   const input = new ort.Tensor("float32", encoded, [padN, 2, 10, 10]);
   const outputs = await session.run({ board: input });
   const logits = outputs.policy_logits.data;
   const values = outputs.value.data;
-  const result = [];
 
-  for (let i = 0; i < n; i += 1) {
-    const state = states[i];
+  for (let i = 0; i < m; i += 1) {
+    const state = missStates[i];
     const mask = state.legalMask();
     const offset = i * actionSize;
     let maxLogit = -1e9;
@@ -447,9 +478,14 @@ async function evaluateBatch(states, rootTemp = 1.0) {
       for (let a = 0; a < actionSize; a += 1) policy[a] = mask[a] ? fallback : 0;
     }
 
-    result.push({ policy, value: clamp(Number(values[i] ?? 0), -1, 1) });
+    const entry = { policy, value: clamp(Number(values[i] ?? 0), -1, 1) };
+    results[missIdx[i]] = entry;
+    evalCache.set(missKeys[i], entry);
+    if (evalCache.size > EVAL_CACHE_MAX) {
+      evalCache.delete(evalCache.keys().next().value);
+    }
   }
-  return result;
+  return results;
 }
 
 function rootPolicy(root) {
@@ -969,6 +1005,7 @@ async function loadModel(modelId = null) {
   }
   if (sessionCache.has(meta.id)) {
     const cached = sessionCache.get(meta.id);
+    evalCache.clear();
     session = cached.session;
     modelConfig = cached.modelConfig;
     activeModel = cached.activeModel;
@@ -981,6 +1018,7 @@ async function loadModel(modelId = null) {
   const modelBytes = await assembleModelBytes(manifest, manifestUrl, meta);
 
   sendProgress(`初始化 ${meta.label}`, modelBytes.byteLength, modelBytes.byteLength);
+  evalCache.clear();
   modelConfig = manifest.config || {};
   let backend = "wasm";
   try {
