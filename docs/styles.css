@@ -9,12 +9,12 @@
 
   /* Surfaces — the void and the charcoal cards lit within it. */
   --bg: #050506;
-  --bg-2: var(--bg-2);
+  --bg-2: #0a0a0d;
   --surface: #141416;
   --surface-2: #191a1e;
   --surface-3: #0f1012;
   --chip-bg: rgba(255, 255, 255, 0.04);
-  --tint: var(--tint); /* raised / hover surface tint */
+  --tint: rgba(255, 255, 255, 0.035); /* raised / hover surface tint */
   --tint-strong: rgba(255, 255, 255, 0.06);
   /* The warm-leaning charcoal "table" the board sits on (lit from above);
      a faint warm radial under the board bridges the warm halo to the cool slab. */
@@ -46,7 +46,7 @@
   --focus: #5aa8ff;
   --good: #3fb984;
   --warn: #e0a33a;
-  --steel: var(--steel); /* cool "opponent" tone in eval/win gradients */
+  --steel: #6e7a8c; /* cool "opponent" tone in eval/win gradients */
 
   /* Board — preserved warm, the centerpiece. */
   --black: #0b0c0a;
@@ -573,7 +573,7 @@ summary:focus-visible,
   bottom: 0;
   width: 100%;
   height: 100%;
-  background: linear-gradient(180deg, var(--steel), var(--black));
+  background: linear-gradient(180deg, var(--steel), #3a4250);
   transform: scaleY(0.5);
   transform-origin: bottom center;
   transition: transform var(--dur) var(--ease-out);
@@ -1156,8 +1156,8 @@ summary:focus-visible,
   top: 0;
   width: 100%;
   height: 100%;
-  border-right: 2px solid var(--line);
-  background: linear-gradient(90deg, var(--black), var(--steel));
+  border-right: 2px solid var(--line-strong);
+  background: linear-gradient(90deg, #3a4250, var(--steel));
   transform: scaleX(0.5);
   transform-origin: left center;
   transition: transform var(--dur) var(--ease-out);
