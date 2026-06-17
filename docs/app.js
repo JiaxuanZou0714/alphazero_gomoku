@@ -54,7 +54,7 @@ const modelInputs = [...document.querySelectorAll("input[name='model']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 const archInputs = [...document.querySelectorAll("input[name='archModel']")];
 
-const APP_VERSION = "2026-06-17-v12";
+const APP_VERSION = "2026-06-17-v13";
 let state = null;
 let selectedSide = "white";
 let selectedModelId = "v5";
@@ -665,10 +665,17 @@ function renderTreeWithD3(nodes, edges) {
     .x((node) => node.y)
     .y((node) => node.x);
 
+  // Paint principal (main-line) edges last so they sit on top of branch edges and
+  // the main line is traceable at a glance instead of being occluded.
+  const orderedLinks = root.links().slice().sort((la, lb) => {
+    const pa = edgeByTarget.get(la.target.data.id)?.principal ? 1 : 0;
+    const pb = edgeByTarget.get(lb.target.data.id)?.principal ? 1 : 0;
+    return pa - pb;
+  });
   svg.append("g")
     .attr("class", "tree-edges")
     .selectAll("path")
-    .data(root.links())
+    .data(orderedLinks)
     .join("path")
     .attr("class", (linkData) => {
       const edge = edgeByTarget.get(linkData.target.data.id);
@@ -678,7 +685,7 @@ function renderTreeWithD3(nodes, edges) {
     .attr("d", link)
     .attr("opacity", (linkData) => {
       const edge = edgeByTarget.get(linkData.target.data.id);
-      return edge ? (0.25 + Math.min(0.55, edge.share * 0.72)).toFixed(2) : 0.28;
+      return edge ? (0.18 + Math.min(0.5, edge.share * 0.68)).toFixed(2) : 0.22;
     })
     .attr("stroke-width", (linkData) => {
       const edge = edgeByTarget.get(linkData.target.data.id);

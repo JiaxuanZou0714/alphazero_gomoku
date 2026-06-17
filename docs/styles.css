@@ -1597,11 +1597,11 @@ summary:focus-visible,
 }
 
 .legend-line.main {
-  background: var(--accent);
+  background: var(--accent-strong);
 }
 
 .legend-line.branch {
-  background: rgba(31, 182, 201, 0.6);
+  background: rgba(122, 134, 154, 0.7);
 }
 
 .legend-dot {
@@ -1609,8 +1609,8 @@ summary:focus-visible,
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
+  background: #2b2e37;
+  border: 1px solid rgba(255, 255, 255, 0.42);
 }
 
 .tree-svg {
@@ -1621,9 +1621,7 @@ summary:focus-visible,
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
-  background:
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 92px 100%,
-    var(--bg-2);
+  background: var(--bg-2);
 }
 
 .tree-depth-line {
@@ -1642,7 +1640,7 @@ summary:focus-visible,
 
 .tree-edge {
   fill: none;
-  stroke: rgba(31, 182, 201, 0.4);
+  stroke: rgba(122, 134, 154, 0.55);
   stroke-linecap: round;
   transition:
     stroke var(--dur) var(--ease-out),
@@ -1651,12 +1649,12 @@ summary:focus-visible,
 }
 
 .tree-edge.strong {
-  stroke: rgba(31, 182, 201, 0.62);
+  stroke: rgba(150, 162, 182, 0.72);
 }
 
 .tree-edge.best {
-  stroke: var(--accent);
-  opacity: 0.95;
+  stroke: var(--accent-strong);
+  opacity: 1;
 }
 
 .tree-node circle {
@@ -1670,8 +1668,8 @@ summary:focus-visible,
 }
 
 .tree-node.black circle {
-  fill: var(--black);
-  stroke: rgba(255, 255, 255, 0.18);
+  fill: #2b2e37;
+  stroke: rgba(255, 255, 255, 0.42);
 }
 
 .tree-node.white circle {
