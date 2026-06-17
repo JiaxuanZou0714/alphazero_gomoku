@@ -592,6 +592,229 @@ function searchAnalysis(root, state, elapsedMs, requestedSimulations) {
   };
 }
 
+/* ----------------------------------------------------------------------------
+ * v0 — hand-written heuristic engine (no neural net, no search). Mirrors
+ * heuristic_v0.py byte-for-byte so the browser opponent plays exactly like the
+ * engine rated on the leaderboard. Only the immediate win/block reflexes plus a
+ * one-ply threat/shape score; it never reads ahead.
+ * ------------------------------------------------------------------------- */
+const V0_DIRS = [[1, 0], [0, 1], [1, 1], [1, -1]];
+
+function v0ShapeScore(count, opens) {
+  if (count >= 5) return 100000;
+  if (count === 4) return opens === 2 ? 15000 : opens === 1 ? 1200 : 0;
+  if (count === 3) return opens === 2 ? 1000 : opens === 1 ? 120 : 0;
+  if (count === 2) return opens === 2 ? 100 : opens === 1 ? 12 : 0;
+  if (count === 1) return opens === 2 ? 8 : 1;
+  return 0;
+}
+
+function v0PlacementScore(board, r, c, player, size) {
+  let total = 0;
+  for (const [dr, dc] of V0_DIRS) {
+    let count = 1;
+    let rr = r + dr, cc = c + dc;
+    while (rr >= 0 && rr < size && cc >= 0 && cc < size && board[rr * size + cc] === player) { count++; rr += dr; cc += dc; }
+    const fwdOpen = rr >= 0 && rr < size && cc >= 0 && cc < size && board[rr * size + cc] === 0;
+    rr = r - dr; cc = c - dc;
+    while (rr >= 0 && rr < size && cc >= 0 && cc < size && board[rr * size + cc] === player) { count++; rr -= dr; cc -= dc; }
+    const bwdOpen = rr >= 0 && rr < size && cc >= 0 && cc < size && board[rr * size + cc] === 0;
+    total += v0ShapeScore(count, (fwdOpen ? 1 : 0) + (bwdOpen ? 1 : 0));
+  }
+  return total;
+}
+
+function v0MakesFive(board, r, c, player, size, win) {
+  for (const [dr, dc] of V0_DIRS) {
+    let count = 1;
+    let rr = r + dr, cc = c + dc;
+    while (rr >= 0 && rr < size && cc >= 0 && cc < size && board[rr * size + cc] === player) { count++; rr += dr; cc += dc; }
+    rr = r - dr; cc = c - dc;
+    while (rr >= 0 && rr < size && cc >= 0 && cc < size && board[rr * size + cc] === player) { count++; rr -= dr; cc -= dc; }
+    if (count >= win) return true;
+  }
+  return false;
+}
+
+function v0Candidates(board, size) {
+  const near = new Uint8Array(size * size);
+  let any = false;
+  for (let i = 0; i < board.length; i++) {
+    if (board[i] === 0) continue;
+    any = true;
+    const r = Math.floor(i / size), c = i % size;
+    for (let dr = -2; dr <= 2; dr++) {
+      for (let dc = -2; dc <= 2; dc++) {
+        const rr = r + dr, cc = c + dc;
+        if (rr >= 0 && rr < size && cc >= 0 && cc < size) near[rr * size + cc] = 1;
+      }
+    }
+  }
+  if (!any) return [Math.floor(size / 2) * size + Math.floor(size / 2)];
+  const out = [];
+  for (let i = 0; i < near.length; i++) if (near[i] && board[i] === 0) out.push(i);
+  return out;
+}
+
+/* Evaluate every candidate cell once; returns the chosen move plus the raw
+ * attack/defense/score for each cell (board is mutated in place and restored). */
+function v0Evaluate(state) {
+  const board = state.board, size = state.size, win = state.winLength;
+  const player = state.currentPlayer, opp = -player;
+  const center = (size - 1) / 2;
+  const cands = v0Candidates(board, size);
+  const scores = new Map();
+  let ownBest = 0, oppBest = 0, winMove = -1;
+  const blocks = [];
+  for (const a of cands) {
+    const r = Math.floor(a / size), c = a % size;
+    board[a] = player;
+    const attack = v0PlacementScore(board, r, c, player, size);
+    const wins = v0MakesFive(board, r, c, player, size, win);
+    board[a] = opp;
+    const defense = v0PlacementScore(board, r, c, opp, size);
+    const oppWins = v0MakesFive(board, r, c, opp, size, win);
+    board[a] = 0;
+    if (wins && winMove < 0) winMove = a;
+    if (oppWins) blocks.push(a);
+    if (attack > ownBest) ownBest = attack;
+    if (defense > oppBest) oppBest = defense;
+    const proximity = -(Math.abs(r - center) + Math.abs(c - center));
+    scores.set(a, { score: attack + 0.9 * defense + 0.05 * proximity, attack, defense });
+  }
+  let action;
+  if (winMove >= 0) {
+    action = winMove;
+  } else if (blocks.length) {
+    action = blocks.reduce((best, a) => {
+      const sa = scores.get(a), sb = scores.get(best);
+      return (sa.attack + 0.9 * sa.defense) > (sb.attack + 0.9 * sb.defense) ? a : best;
+    }, blocks[0]);
+  } else {
+    action = cands.reduce((best, a) => scores.get(a).score > scores.get(best).score ? a : best, cands[0]);
+  }
+  return { action, scores, ownBest, oppBest, winMove };
+}
+
+function v0Value(ev) {
+  if (ev.winMove >= 0) return 0.96;
+  return Math.max(-0.9, Math.min(0.9, Math.tanh((ev.ownBest - ev.oppBest) / 2500) * 0.85));
+}
+
+/* One-ply value of a candidate move from the current player's perspective:
+ * our threat at the cell minus the opponent's best reply afterwards. */
+function v0CandidateValue(state, action, info) {
+  if (state.winLength && info.attack >= 100000) return 0.97;
+  const board = state.board, size = state.size, player = state.currentPlayer, opp = -player;
+  board[action] = player;
+  let oppReply = 0;
+  for (const a of v0Candidates(board, size)) {
+    if (board[a] !== 0) continue;
+    const r = Math.floor(a / size), c = a % size;
+    board[a] = opp;
+    const s = v0PlacementScore(board, r, c, opp, size);
+    board[a] = 0;
+    if (s > oppReply) oppReply = s;
+  }
+  board[action] = 0;
+  return Math.max(-0.92, Math.min(0.95, Math.tanh((info.attack - oppReply) / 2500) * 0.85));
+}
+
+function v0PrincipalVariation(state, maxLen) {
+  let s = state.clone();
+  const pv = [];
+  for (let i = 0; i < maxLen && s.winner === null; i++) {
+    const a = v0Evaluate(s).action;
+    pv.push({ row: Math.floor(a / s.size), col: a % s.size });
+    s = s.apply(a);
+  }
+  return pv;
+}
+
+/* Synthesize a tree compatible with buildSearchTree's output: a depth-1 fan of
+ * the top candidates plus the heuristic's greedy principal line. */
+function v0Tree(state, topN, shares, bestAction, pv, rootWinProb, qMap) {
+  const size = state.size, player = state.currentPlayer;
+  const nodes = [{ id: 0, parentId: null, depth: 0, row: null, col: null, mover: null, visits: 1000, share: 1, branchShare: 1, rank: 0, principal: true, prior: null, winProb: rootWinProb }];
+  const edges = [];
+  let principalId = 0, principalShare = 1;
+  topN.forEach(([action, info], i) => {
+    const id = nodes.length;
+    const r = Math.floor(action / size), c = action % size;
+    const principal = action === bestAction;
+    const q = qMap[action];
+    nodes.push({ id, parentId: 0, depth: 1, row: r, col: c, mover: player, visits: Math.round(shares[i] * 1000), share: shares[i], branchShare: shares[i], rank: i, principal, prior: shares[i], winProb: q === null || q === undefined ? null : (q + 1) / 2 });
+    edges.push({ from: 0, to: id, share: shares[i], rank: i, principal });
+    if (principal) { principalId = id; principalShare = shares[i]; }
+  });
+  let parentId = principalId, mover = player, share = principalShare;
+  for (let d = 1; d < pv.length && d <= 5; d++) {
+    mover = -mover;
+    share *= 0.75;
+    const id = nodes.length;
+    nodes.push({ id, parentId, depth: d + 1, row: pv[d].row, col: pv[d].col, mover, visits: Math.round(share * 1000), share, branchShare: share, rank: 0, principal: true, prior: share, winProb: null });
+    edges.push({ from: parentId, to: id, share, rank: 0, principal: true });
+    parentId = id;
+  }
+  return { nodes, edges };
+}
+
+function heuristicAnalysis(state) {
+  const start = performance.now();
+  const ev = v0Evaluate(state);
+  const player = state.currentPlayer, size = state.size;
+  const value = v0Value(ev);
+  const winProb = (value + 1) / 2;
+
+  const ranked = [...ev.scores.entries()].sort((a, b) => b[1].score - a[1].score);
+  const topN = ranked.slice(0, 8);
+  const sMax = topN.length ? topN[0][1].score : 0;
+  const temp = Math.max(250, Math.abs(sMax) * 0.2);
+  let wsum = 0;
+  const weights = topN.map(([, v]) => { const w = Math.exp((v.score - sMax) / temp); wsum += w; return w; });
+  const shares = weights.map((w) => w / (wsum || 1));
+
+  const qMap = new Array(state.actionSize).fill(null);
+  const visitMap = new Array(state.actionSize).fill(0);
+  const priorMap = new Array(state.actionSize).fill(0);
+  const candidates = topN.map(([action, info], i) => {
+    const qv = v0CandidateValue(state, action, info);
+    qMap[action] = qv;
+    visitMap[action] = shares[i];
+    priorMap[action] = shares[i];
+    return {
+      row: Math.floor(action / size), col: action % size,
+      visits: Math.round(shares[i] * 1000), share: shares[i],
+      prior: shares[i], q: qv, selected: action === ev.action,
+    };
+  });
+  if (qMap[ev.action] === null) qMap[ev.action] = v0CandidateValue(state, ev.action, ev.scores.get(ev.action));
+
+  const pv = v0PrincipalVariation(state, 8);
+  const tree = v0Tree(state, topN, shares, ev.action, pv, winProb, qMap);
+
+  return {
+    action: ev.action,
+    analysis: {
+      player,
+      moveNumber: state.movesPlayed,
+      rootValue: value,
+      winProb,
+      simulations: 0,
+      requestedSimulations: 0,
+      elapsedMs: performance.now() - start,
+      visitMap,
+      priorMap,
+      qMap,
+      candidates,
+      pv,
+      tree,
+      engine: "heuristic",
+    },
+    root: { children: new Map() },
+  };
+}
+
 function stateKey(state) {
   return [
     state.movesPlayed,
@@ -740,6 +963,7 @@ class GameSession {
   constructor(config, modelMeta) {
     this.config = config;
     this.modelMeta = modelMeta;
+    this.engine = (modelMeta && modelMeta.engine) || "nn";
     this.defaultSimulations = 512;
     this.mcts = new BrowserMCTS(config);
     this.state = GomokuState.new(
@@ -868,6 +1092,25 @@ class GameSession {
       const evaluation = terminalEvaluation(target);
       this.evaluation = evaluation;
       return evaluation;
+    } else if (this.engine === "heuristic") {
+      const ev = v0Evaluate(target);
+      const value = v0Value(ev);
+      const currentWinProb = (value + 1) / 2;
+      const blackWinProb = target.currentPlayer === 1 ? currentWinProb : 1 - currentWinProb;
+      const result = {
+        key: stateKey(target),
+        source: "heuristic",
+        player: target.currentPlayer,
+        moveNumber: target.movesPlayed,
+        lastMove: target.lastMove,
+        winner: target.winner,
+        value,
+        winProb: currentWinProb,
+        blackWinProb,
+        elapsedMs: performance.now() - start,
+      };
+      this.evaluation = result;
+      return result;
     } else {
       const [evaluation] = await evaluateBatch([target]);
       const currentWinProb = (evaluation.value + 1) / 2;
@@ -907,6 +1150,7 @@ class GameSession {
   }
 
   async searchPolicy() {
+    if (this.engine === "heuristic") return heuristicAnalysis(this.state);
     const start = performance.now();
     const root = await this.mcts.search(this.state, this.simulations, this.currentReusableRoot());
     this.storeReusableRoot(root);
@@ -1026,7 +1270,33 @@ async function resolveModelManifest(modelId = null) {
   return { entry, manifest, manifestUrl };
 }
 
+/* v0 carries no weights — it's a pure JS heuristic, so loading is instant and
+ * skips the runtime/ONNX path entirely. */
+function loadHeuristicEngine() {
+  const meta = {
+    id: "v0",
+    label: "v0",
+    arch: "手写启发式",
+    engine: "heuristic",
+    channels: 0,
+    blocks: 0,
+    params: 0,
+    backend: "heuristic",
+    iteration: null,
+  };
+  evalCache.clear();
+  session = null;
+  modelConfig = { board_size: 10, win_length: 5 };
+  activeModel = meta;
+  game = new GameSession(modelConfig, meta);
+  sendProgress("v0 启发式引擎就绪", 1, 1);
+}
+
 async function loadModel(modelId = null) {
+  if (modelId === "v0") {
+    loadHeuristicEngine();
+    return;
+  }
   await ensureRuntime();
   const { entry, manifest, manifestUrl } = await resolveModelManifest(modelId);
   const meta = modelSummary(manifest, entry);

@@ -54,7 +54,7 @@ const modelInputs = [...document.querySelectorAll("input[name='model']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 const archInputs = [...document.querySelectorAll("input[name='archModel']")];
 
-const APP_VERSION = "2026-06-17-v14";
+const APP_VERSION = "2026-06-17-v15";
 let state = null;
 let selectedSide = "white";
 let selectedModelId = "v5";
@@ -394,6 +394,9 @@ function renderEval() {
     } else if (evaluation.source === "mcts") {
       evalSource.textContent = "黑方胜率来自本次 MCTS 搜索。";
       statSims.textContent = "MCTS";
+    } else if (evaluation.source === "heuristic") {
+      evalSource.textContent = "黑方胜率来自 v0 启发式威胁评估。";
+      statSims.textContent = "启发式";
     } else {
       evalSource.textContent = "黑方胜率来自神经网络单次评估。";
       statSims.textContent = "模型";
@@ -724,9 +727,12 @@ function renderTree() {
   const tree = a && a.tree;
   const nodes = tree && tree.nodes ? tree.nodes : [];
   const edges = tree && tree.edges ? tree.edges : [];
-  treeTitle.textContent = "MCTS 搜索树";
+  const isHeuristic = state && state.model && state.model.id === "v0";
+  treeTitle.textContent = isHeuristic ? "v0 威胁树" : "MCTS 搜索树";
   treeCopy.textContent = context
-    ? "这里只显示访问最多的一小部分搜索树。越往右代表后续层数越深；线越粗，访问越多。"
+    ? (isHeuristic
+        ? "v0 不搜索：这里展示它一步威胁评分最高的候选，以及顺着启发式贪心走出的主线。"
+        : "这里只显示访问最多的一小部分搜索树。越往右代表后续层数越深；线越粗，访问越多。")
     : "点“提示”后显示。";
   treeCount.textContent = Math.max(0, nodes.length - 1);
   treeDepth.textContent = nodes.length ? "深度 -" : "等待建议";
@@ -839,6 +845,10 @@ function render(nextState) {
   const simIndex = simulationIndexFor(state.simulations);
   simSlider.value = simIndex;
   syncSimulationDisplay(SIMULATION_OPTIONS[simIndex]);
+  // v0 has no search, so the depth slider is inert — disable it and say so.
+  const heuristicEngine = state.model && state.model.id === "v0";
+  simSlider.disabled = heuristicEngine;
+  if (heuristicEngine) simValue.textContent = "无搜索";
   sideLabel.textContent = state.humanPlayer === 1 ? "执黑" : "执白";
   selectedModelId = state.model && state.model.id ? state.model.id : selectedModelId;
   modelInputs.forEach((input) => {
@@ -1157,6 +1167,7 @@ const VERSION_TIMELINE = [
   { n: 16, date: "06-17", title: "训练 infra 大提速：批量自对弈 + Gumbel MCTS", desc: "面向更轻更强的 v5：批量跨对局自对弈引擎（单卡 ~6×，样本与串行等价）+ Gumbel AlphaZero（少 sims 出更优策略目标，破 policy_top1=0.68 停滞）+ 蒸馏脚本修复与数据集缓存。发现自对弈吞吐与网络大小无关、∝1/sims，故 v5 走「批量+Gumbel 提速 + 蒸馏小网」路线。" },
   { n: 17, date: "06-17", title: "v5：更小且 SOTA", desc: "蒸馏 v4 进 64×5（仅 ~65万参数）做 init，再用批量+Gumbel(96 sims)+损失重平衡+fresh cosine 做 RL，3080 约 3h 收敛（policy_top1 破 0.68 至 ~0.76）。", model: { tag: "默认", text: "🏆 v5-tiny-3080（新 SOTA）— 循环赛各 60 局对 v4 0.750 / v3 0.783 / v1 1.000，Elo 1607（v4 1426 / v3 1358 / v1 1000），fp16 仅 1.17MB，现为网页默认模型" } },
   { n: 18, date: "06-17", title: "网页棋力榜（Elo 柱状图）", desc: "新增「棋力榜」面板：循环赛 Bradley-Terry Elo 横向柱状图，直观对比 v1–v5 棋力；默认模型切换为 v5。" },
+  { n: 19, date: "06-17", title: "v0：纯手写启发式基线 + 上榜", desc: "新增 v0——不带网络、不搜索的手写启发式（立即成五/挡五反射 + 一步威胁棋形评分），同一套打分在网页 worker 逐字镜像（399 局面 Python↔JS 100% 对齐），模型选择器加入 v0（秒载、无深算）。", model: { tag: "基线", text: "🎯 v0（手写启发式）— 各 30 局对 v1 1.000 / v3 0.683 / v4 0.633 / v5 0.283，固定 v1–v5 Elo 拟合得 Elo 1501，排名第 2，头对头反超 v4/v3，仅 v5 稳压。脚本 scripts/rate_v0.py 可复现。" } },
 ];
 
 function setupVersionsDialog() {
