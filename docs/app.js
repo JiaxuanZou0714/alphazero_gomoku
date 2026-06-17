@@ -54,11 +54,11 @@ const modelInputs = [...document.querySelectorAll("input[name='model']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 const archInputs = [...document.querySelectorAll("input[name='archModel']")];
 
-const APP_VERSION = "2026-06-16-v6";
+const APP_VERSION = "2026-06-17-v7";
 let state = null;
 let selectedSide = "white";
-let selectedModelId = "v4";
-let selectedArchId = "v4"; // which model's structure the diagram shows (independent of the loaded model)
+let selectedModelId = "v5";
+let selectedArchId = "v5"; // which model's structure the diagram shows (independent of the loaded model)
 let overlayMode = "none";
 let busy = true;
 let cells = [];
@@ -924,7 +924,7 @@ async function analyze() {
 // (scripts/render_architecture.py — stacked feature-map volumes with ResNet
 // skip connections). Switching model just swaps the <img>; each figure bakes
 // in that model's channel/block counts.
-const ARCH_DIAGRAM_IDS = new Set(["v1", "v3", "v4"]);
+const ARCH_DIAGRAM_IDS = new Set(["v1", "v3", "v4", "v5"]);
 
 function initNetworkDiagram() {
   if (!networkDiagram) return;
@@ -945,6 +945,44 @@ function initNetworkDiagram() {
   networkDiagram.classList.add("is-rendered");
   networkDiagram.classList.remove("diagram-error");
   renderedNetworkKey = id;
+}
+
+async function renderLeaderboard() {
+  const host = document.getElementById("leaderboardChart");
+  if (!host) return;
+  let data;
+  try {
+    const res = await fetch(`./assets/leaderboard.json?v=${APP_VERSION}`, { cache: "no-cache" });
+    if (!res.ok) throw new Error(String(res.status));
+    data = await res.json();
+  } catch (_e) {
+    host.textContent = "榜单暂不可用";
+    return;
+  }
+  const entries = (data.ratings || []).slice().sort((a, b) => b.elo - a.elo);
+  if (!entries.length) return;
+  const note = document.getElementById("leaderboardNote");
+  if (note && data.note) note.textContent = data.note;
+  const top = document.getElementById("leaderboardTop");
+  if (top) top.textContent = entries[0].id;
+  const max = entries[0].elo;
+  const min = entries[entries.length - 1].elo;
+  const span = Math.max(1, max - min);
+  host.replaceChildren(...entries.map((e, i) => {
+    // Weakest bar floors at 22% so it stays visible; strongest fills the track.
+    const pct = 22 + 78 * ((e.elo - min) / span);
+    const row = document.createElement("div");
+    row.className = "lb-row" + (i === 0 ? " is-top" : "");
+    row.innerHTML =
+      `<span class="lb-name">${e.id}</span>` +
+      `<div class="lb-track"><div class="lb-fill"></div>` +
+      `<span class="lb-val">${Math.round(e.elo)}` +
+      (e.arch ? `<span class="lb-sub">${e.arch}</span>` : "") +
+      `</span></div>`;
+    const fill = row.querySelector(".lb-fill");
+    requestAnimationFrame(() => { fill.style.width = pct.toFixed(1) + "%"; });
+    return row;
+  }));
 }
 
 function setOverlay(mode) {
@@ -1050,6 +1088,7 @@ function populateModelLabels(catalog) {
 
 async function boot() {
   registerServiceWorker();
+  renderLeaderboard();
   const catalog = await loadCatalogForSelector();
   if (catalog) {
     populateModelLabels(catalog);
@@ -1105,10 +1144,12 @@ const VERSION_TIMELINE = [
   { n: 10, date: "06-16", title: "大型 infra 重构", desc: "共享 inference.py、PRESETS 字典化、self-play/eval 改 ProcessPoolExecutor（修 GIL/RNG）、多处 bug 修复；转 Linux-only。" },
   { n: 11, date: "06-16", title: "GPU 训练循环提速", desc: "训练时 bf16 AMP + cuDNN autotune + 减少 per-batch 同步 + 向量化对称增广；3080 实测 1.61× 训练步加速。" },
   { n: 12, date: "06-16", title: "KataGo 扩展：EMA 与 ownership 头", desc: "opt-in EMA-of-weights（gate 失败不回滚训练模型）与 ownership 辅助头（对称同步 + MSE 损失），默认关闭。" },
-  { n: 13, date: "06-16", title: "v4 训练：warm-start + 开局多样化", desc: "从 v3 additive-head warm-start，叠加 EMA / ownership / self-play 开局多样化，3080 RL 至晋升第 35 轮 EMA best。", model: { tag: "默认", text: "🎯 v4-student-3080 — 对 v3 33-27-0（0.550），黑白更均衡、更鲁棒，现为网页默认模型" } },
+  { n: 13, date: "06-16", title: "v4 训练：warm-start + 开局多样化", desc: "从 v3 additive-head warm-start，叠加 EMA / ownership / self-play 开局多样化，3080 RL 至晋升第 35 轮 EMA best。", model: { tag: "可选", text: "🎯 v4-student-3080 — 对 v3 33-27-0（0.550），黑白更均衡、更鲁棒，曾为网页默认" } },
   { n: 14, date: "06-16", title: "v4 上线网页 + 每模型架构图", desc: "v4 加入 catalog、版本面板展示；每模型 SVG 架构图与结构选择器；sw network-first + IndexedDB 按 sha256 失效。" },
   { n: 15, date: "06-16", title: "网页推理 infra 提速", desc: "WebGPU 固定形状 batch + 预热消除首手 shader 编译延迟；v4 导出改 fp16，下载 11.95MB→6.0MB，落子与 fp32 100% 一致。" },
-  { n: 16, date: "06-17", title: "训练 infra 大提速：批量自对弈 + Gumbel MCTS", desc: "面向更轻更强的 v5：批量跨对局自对弈引擎（单卡 ~6×，样本与串行等价）+ Gumbel AlphaZero（少 sims 出更优策略目标，破 policy_top1=0.68 停滞）+ 蒸馏脚本修复与数据集缓存。发现自对弈吞吐与网络大小无关、∝1/sims，故 v5 走「批量+Gumbel 提速 + 蒸馏小网」路线。网页默认模型切换为 v4。" },
+  { n: 16, date: "06-17", title: "训练 infra 大提速：批量自对弈 + Gumbel MCTS", desc: "面向更轻更强的 v5：批量跨对局自对弈引擎（单卡 ~6×，样本与串行等价）+ Gumbel AlphaZero（少 sims 出更优策略目标，破 policy_top1=0.68 停滞）+ 蒸馏脚本修复与数据集缓存。发现自对弈吞吐与网络大小无关、∝1/sims，故 v5 走「批量+Gumbel 提速 + 蒸馏小网」路线。" },
+  { n: 17, date: "06-17", title: "v5：更小且 SOTA", desc: "蒸馏 v4 进 64×5（仅 ~65万参数）做 init，再用批量+Gumbel(96 sims)+损失重平衡+fresh cosine 做 RL，3080 约 3h 收敛（policy_top1 破 0.68 至 ~0.76）。", model: { tag: "默认", text: "🏆 v5-tiny-3080（新 SOTA）— 循环赛各 60 局对 v4 0.750 / v3 0.783 / v1 1.000，Elo 1607（v4 1426 / v3 1358 / v1 1000），fp16 仅 1.17MB，现为网页默认模型" } },
+  { n: 18, date: "06-17", title: "网页棋力榜（Elo 柱状图）", desc: "新增「棋力榜」面板：循环赛 Bradley-Terry Elo 横向柱状图，直观对比 v1–v5 棋力；默认模型切换为 v5。" },
 ];
 
 function setupVersionsDialog() {

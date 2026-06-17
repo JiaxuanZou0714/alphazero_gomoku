@@ -70,14 +70,19 @@
           <fieldset class="segmented model-seg" aria-label="对战模型">
             <legend class="sr-only">对战模型</legend>
             <label class="segment model-option">
+              <input type="radio" name="model" value="v5" checked />
+              <span>v5 tiny</span>
+              <small data-model-arch>64×5 · iter 95</small>
+            </label>
+            <label class="segment model-option">
+              <input type="radio" name="model" value="v4" />
+              <span>v4 student</span>
+              <small data-model-arch>128×8 · iter 35</small>
+            </label>
+            <label class="segment model-option">
               <input type="radio" name="model" value="v3" />
               <span>v3 student</span>
               <small data-model-arch>128×8 · iter 90</small>
-            </label>
-            <label class="segment model-option">
-              <input type="radio" name="model" value="v4" checked />
-              <span>v4 student</span>
-              <small data-model-arch>128×8 · iter 35</small>
             </label>
             <label class="segment model-option">
               <input type="radio" name="model" value="v1" />
@@ -146,6 +151,15 @@
           <p class="source" id="evalSource">-</p>
         </section>
 
+        <section class="panel leaderboard" aria-label="棋力榜">
+          <div class="panel-title">
+            <span>棋力榜 · Elo</span>
+            <strong id="leaderboardTop">—</strong>
+          </div>
+          <div id="leaderboardChart" class="lb-chart" role="img" aria-label="各模型棋力 Elo 柱状图"></div>
+          <p class="source" id="leaderboardNote">循环赛 Elo · 128 sims · 颜色互换</p>
+        </section>
+
         <section class="panel history">
           <div class="panel-title">
             <span>最近落子</span>
@@ -160,7 +174,7 @@
               <span>版本迭代</span>
               <small>训练 / 模型 / infra / 前端 全部迭代</small>
             </span>
-            <strong>v1–v4</strong>
+            <strong>v1–v5</strong>
           </button>
         </section>
       </aside>
@@ -230,8 +244,9 @@
               <span class="arch-picker-label">查看结构</span>
               <fieldset class="segmented arch-seg" aria-label="选择要查看结构的模型">
                 <legend class="sr-only">选择要查看结构的模型</legend>
+                <label class="segment"><input type="radio" name="archModel" value="v5" checked /><span>v5</span></label>
+                <label class="segment"><input type="radio" name="archModel" value="v4" /><span>v4</span></label>
                 <label class="segment"><input type="radio" name="archModel" value="v3" /><span>v3</span></label>
-                <label class="segment"><input type="radio" name="archModel" value="v4" checked /><span>v4</span></label>
                 <label class="segment"><input type="radio" name="archModel" value="v1" /><span>v1</span></label>
               </fieldset>
             </div>
