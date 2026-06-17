@@ -57,8 +57,8 @@ const archInputs = [...document.querySelectorAll("input[name='archModel']")];
 const APP_VERSION = "2026-06-16-v6";
 let state = null;
 let selectedSide = "white";
-let selectedModelId = "v3";
-let selectedArchId = "v3"; // which model's structure the diagram shows (independent of the loaded model)
+let selectedModelId = "v4";
+let selectedArchId = "v4"; // which model's structure the diagram shows (independent of the loaded model)
 let overlayMode = "none";
 let busy = true;
 let cells = [];
@@ -1100,14 +1100,15 @@ const VERSION_TIMELINE = [
   { n: 5, date: "06-14", title: "v2 长训尝试", desc: "加 v2 preset 与远端启动脚本，从 old best 继续长训并调 replay / 步数 / 搜索预算。", model: { tag: "failed", text: "⚠️ v2 — 96→112 轮曲线退化，未稳超 old best，已归档" } },
   { n: 6, date: "06-15", title: "轻量 student 蒸馏", desc: "用 old best 蒸馏 128×8 student（24 步 raw + 16 步 MCTS 微调），过最低准入 benchmark。", model: { tag: "seed", text: "🎯 distill seed — 轻量 student，后续 RL 的起点" } },
   { n: 7, date: "06-15", title: "并行评估 infra 与稳定化", desc: "新增 eval-workers / eval-devices 等；eval 改多 worker 多 GPU 并行（20 局 9m37s→2m42s），checkpoint 原子替换。" },
-  { n: 8, date: "06-15", title: "v3 student 大规模 RL", desc: "从 seed 起 KataGo-style RL，每轮 96 盘 self-play、每 5 轮 champion gate，晋升第 90 轮。", model: { tag: "default", text: "🎯 v3-student — 128 sims 对 v1 为 54-10-0（0.844），网页默认模型" } },
+  { n: 8, date: "06-15", title: "v3 student 大规模 RL", desc: "从 seed 起 KataGo-style RL，每轮 96 盘 self-play、每 5 轮 champion gate，晋升第 90 轮。", model: { tag: "曾默认", text: "🎯 v3-student — 128 sims 对 v1 为 54-10-0（0.844），曾为网页默认模型" } },
   { n: 9, date: "06-15", title: "网页多模型选择器", desc: "catalog.json + 选择器可在 v1/v3 间切换；新增网页版本记录页。" },
   { n: 10, date: "06-16", title: "大型 infra 重构", desc: "共享 inference.py、PRESETS 字典化、self-play/eval 改 ProcessPoolExecutor（修 GIL/RNG）、多处 bug 修复；转 Linux-only。" },
   { n: 11, date: "06-16", title: "GPU 训练循环提速", desc: "训练时 bf16 AMP + cuDNN autotune + 减少 per-batch 同步 + 向量化对称增广；3080 实测 1.61× 训练步加速。" },
   { n: 12, date: "06-16", title: "KataGo 扩展：EMA 与 ownership 头", desc: "opt-in EMA-of-weights（gate 失败不回滚训练模型）与 ownership 辅助头（对称同步 + MSE 损失），默认关闭。" },
-  { n: 13, date: "06-16", title: "v4 训练：warm-start + 开局多样化", desc: "从 v3 additive-head warm-start，叠加 EMA / ownership / self-play 开局多样化，3080 RL 至晋升第 35 轮 EMA best。", model: { tag: "parity", text: "🎯 v4-student-3080 — 对 v3 33-27-0（0.550），黑白更均衡、更鲁棒，可选模型" } },
+  { n: 13, date: "06-16", title: "v4 训练：warm-start + 开局多样化", desc: "从 v3 additive-head warm-start，叠加 EMA / ownership / self-play 开局多样化，3080 RL 至晋升第 35 轮 EMA best。", model: { tag: "默认", text: "🎯 v4-student-3080 — 对 v3 33-27-0（0.550），黑白更均衡、更鲁棒，现为网页默认模型" } },
   { n: 14, date: "06-16", title: "v4 上线网页 + 每模型架构图", desc: "v4 加入 catalog、版本面板展示；每模型 SVG 架构图与结构选择器；sw network-first + IndexedDB 按 sha256 失效。" },
   { n: 15, date: "06-16", title: "网页推理 infra 提速", desc: "WebGPU 固定形状 batch + 预热消除首手 shader 编译延迟；v4 导出改 fp16，下载 11.95MB→6.0MB，落子与 fp32 100% 一致。" },
+  { n: 16, date: "06-17", title: "训练 infra 大提速：批量自对弈 + Gumbel MCTS", desc: "面向更轻更强的 v5：批量跨对局自对弈引擎（单卡 ~6×，样本与串行等价）+ Gumbel AlphaZero（少 sims 出更优策略目标，破 policy_top1=0.68 停滞）+ 蒸馏脚本修复与数据集缓存。发现自对弈吞吐与网络大小无关、∝1/sims，故 v5 走「批量+Gumbel 提速 + 蒸馏小网」路线。网页默认模型切换为 v4。" },
 ];
 
 function setupVersionsDialog() {

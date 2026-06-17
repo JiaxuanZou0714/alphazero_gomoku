@@ -935,7 +935,7 @@ async function loadCatalog() {
   modelCatalog = {
     baseUrl: catalogUrl,
     catalog: {
-      defaultModel: "v3",
+      defaultModel: "v4",
       models: [
         { id: "v3", label: "v3 student", manifest: "v3/manifest.json" },
         { id: "v4", label: "v4 student", manifest: "v4/manifest.json" },
