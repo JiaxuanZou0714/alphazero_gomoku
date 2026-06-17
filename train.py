@@ -565,6 +565,75 @@ PRESETS: dict[str, dict[str, object]] = {
         "early_stop_evals": 10,
         **_KATAGO_DEFAULTS,
     },
+    # v6: pure-AlphaZero continuation of v5 (NO priors, NO hand rules, NO bigger
+    # net). v5 froze at policy_top1~0.757 because the 96-sim Gumbel targets are
+    # target-quality-limited, and it still loses ~28% to the v0 threat heuristic
+    # (tactical blunders). Both are fixed the pure way: more search at self-play
+    # time -> cleaner improved-policy targets that don't blunder -> the net learns
+    # sharper, more tactically-sound play. Same 64x5 so the web app is unchanged.
+    "v6-tiny-3080": {
+        "iterations": 200,
+        "games_per_iteration": 256,
+        "simulations": 160,            # 96 -> 160: cleaner Gumbel targets
+        "fast_simulations": 48,        # 32 -> 48
+        "mcts_batch_size": 32,
+        "epochs": 1,
+        "train_steps_per_iteration": 250,
+        "batch_size": 1024,
+        "replay_size": 150_000,
+        "min_replay_size": 10_000,
+        "max_train_replay_passes": 2.0,
+        "learning_rate": 1.0e-4,       # fresh cosine restart from converged v5
+        "min_learning_rate": 1.0e-5,
+        "lr_schedule": "cosine",
+        "warmup_iterations": 3,
+        "weight_decay": 1.0e-4,
+        "max_grad_norm": 10.0,
+        "temperature_moves": 12,
+        "mcts_c_puct": 1.25,
+        "mcts_dirichlet_alpha": 0.15,
+        "channels": 64,
+        "residual_blocks": 5,
+        "policy_channels": 8,
+        "value_channels": 4,
+        "value_hidden": 192,
+        "soft_policy_loss_weight": 6.0,
+        "value_loss_weight": 0.8,
+        "surprise_weighting": False,
+        "mcts_value_weight": 0.25,
+        "full_search_prob": 0.6,       # 0.4 -> 0.6: more full-sim (clean) moves
+        "selfplay_batched": True,
+        "selfplay_batch_games": 256,
+        "mcts_gumbel": True,
+        "mcts_gumbel_considered": 24,  # 16 -> 24: wider root, better tactics
+        "selfplay_opening_moves": 6,
+        "selfplay_opening_prob": 0.7,
+        "use_ownership": True,
+        "ownership_loss_weight": 0.15,
+        "ema_decay": 0.9,
+        "checkpoint_dir": "alphazero_gomoku/outputs/checkpoints/v6-tiny-3080",
+        "replay_path": "alphazero_gomoku/outputs/replay/v6-tiny-3080_replay.pt",
+        "replay_save_interval": 2,
+        "metrics_path": "alphazero_gomoku/outputs/metrics/v6-tiny-3080.jsonl",
+        # Warm-start from v5 best: the run's champion starts EQUAL to v5, so a
+        # promotion requires actually beating v5.
+        "resume": "alphazero_gomoku/outputs/checkpoints/v5-tiny-3080/gomoku10_best.pt",
+        "resume_allow_partial": True,
+        "self_play_workers": 1,
+        "self_play_devices": "auto",
+        "eval_interval": 5,
+        "eval_games": 24,
+        "eval_simulations": 128,
+        "eval_opening_moves": 4,
+        "eval_progress_interval": 1,
+        "eval_workers": 3,
+        "train_data_workers": 2,
+        "eval_early_cutoff": True,
+        "promotion_threshold": 0.55,
+        "gate_evaluation": True,
+        "early_stop_evals": 10,
+        **_KATAGO_DEFAULTS,
+    },
     "a100-4": {
         "iterations": 100,
         "games_per_iteration": 96,
@@ -2429,6 +2498,7 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
             "v3-student-local",
             "v4-student-3080",
             "v5-tiny-3080",
+            "v6-tiny-3080",
             "a100-4",
             "a100-fast",
             "a100-turbo",
@@ -2587,6 +2657,7 @@ def main() -> None:
             "v3-student-local",
             "v4-student-3080",
             "v5-tiny-3080",
+            "v6-tiny-3080",
             "a100-4",
             "a100-fast",
             "a100-turbo",
