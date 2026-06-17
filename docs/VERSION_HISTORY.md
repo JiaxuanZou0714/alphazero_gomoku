@@ -1,6 +1,6 @@
 # 版本记录
 
-最后更新：2026-06-16
+最后更新：2026-06-17
 
 按时间顺序记录每一次迭代——不断改进**训练逻辑、模型架构、基础设施、网页前端**。编号递增、最新在下；🎯 标记带模型产出的里程碑。
 
@@ -55,6 +55,10 @@ v4 加入 `catalog.json`、版本面板展示；新增每模型 SVG 架构图与
 
 ### 15. 网页推理 infra 提速 · 2026-06-16
 WebGPU 固定形状 batch + 加载预热，消除首手 shader 编译延迟（仅 WebGPU，wasm 路径不变）；v4 导出改 **fp16**（权重半精度、I/O 仍 float32，worker 不变），下载 `11.95MB -> 6.0MB`，policy argmax 与 fp32 `100%` 一致。
+
+### 16. 训练 infra 大提速：批量自对弈 + Gumbel MCTS · 2026-06-17
+面向「更轻、更强」的 v5：① **批量跨对局自对弈引擎**（`selfplay_batched.py`）——单进程内 `N` 局并行、每 tick 把所有局的叶子评估融成一个大 GPU batch，单卡实测 **`~6x`** 于串行/多 worker 路径，产出样本与串行等价（胜率/value 分布一致），opt-in 接入训练（`--selfplay-batched`）。② **Gumbel AlphaZero**（`gumbel.py` + `9` 单测）——Gumbel-top-m + Sequential Halving 根选择 + `softmax(logits+σ(completedQ))` 改进策略目标，低 sims 下标签噪声更小（破 `policy_top1=0.68` 停滞的杠杆），实测吞吐 **∝ 1/sims**（半 sims → `2x`），自对弈胜率更均衡（`0.50/0.50`）。③ 修复 `distill_old_best.py` 的 `MCTS` 漏导入 bug + 加 `--dataset-cache`（多尺寸共享同一份教师目标）。④ MCTS `Node __slots__` + eval 守卫。`64` 单测全过。
+🔬 **关键发现**：自对弈吞吐**与网络大小无关**（串行被 GPU 启动开销、批量被 Python 树操作主导），「更小=更快训练」在本栈不成立——小模型只为部署体积/延迟服务，提速靠批量 + Gumbel 减 sims。故 v5 尺寸按「能保住棋力的最小」选，而非按速度。
 
 ---
 

@@ -90,10 +90,24 @@ class TrainConfig:
     mcts_fpu_reduction: float = 0.0     # KataGo FPU: unvisited child Q = parent Q - fpu * sqrt(visited mass)
     mcts_forced_playouts: bool = False  # KataGo: forced playouts + policy target pruning at the root
     mcts_forced_playout_k: float = 2.0  # n_forced = sqrt(k * prior * root_visits)
+    # Gumbel AlphaZero self-play (batched engine only). Gives a low-noise
+    # improved-policy target so the same sim budget yields better policy targets —
+    # the lever for breaking the policy_top1 plateau at fewer sims.
+    mcts_gumbel: bool = False
+    mcts_gumbel_considered: int = 16
+    mcts_gumbel_c_visit: float = 50.0
+    mcts_gumbel_c_scale: float = 1.0
     playout_cap_randomization: bool = False  # KataGo: mix cheap (value-only) and full (policy) searches
     full_search_prob: float = 0.25      # probability of a full search per move when PCR is on
     fast_simulations: int = 0           # simulations for cheap searches (0 = simulations // 4)
     selfplay_tree_reuse: bool = True    # reuse the chosen subtree between self-play moves
+    # Batched cross-game self-play: advance `selfplay_batch_games` games in lockstep
+    # on a single process, fusing every game's per-tick leaf eval into one GPU batch.
+    # ~6x faster than the serial/worker path on a single GPU (the network batch grows
+    # from ~mcts_batch_size to ~selfplay_batch_games). Off by default so golden/other
+    # presets are unchanged; when on it supersedes self_play_workers (one process).
+    selfplay_batched: bool = False
+    selfplay_batch_games: int = 64
     # Opening diversity: start a fraction of self-play games from a few uniformly
     # random legal plies (KataGo-style varied initialisation). Off by default so
     # other presets/golden are unchanged. Diversifies positions for BOTH colors —
@@ -1074,6 +1088,27 @@ def collect_self_play_examples(
     mcts_cfg: MCTSConfig,
     iteration: int,
 ) -> tuple[list[Example], list[float], list[int], dict[str, float]]:
+    if cfg.selfplay_batched:
+        from .selfplay_batched import play_self_games_batched
+
+        start = time.monotonic()
+        examples, kl_surprises, lengths, stats = play_self_games_batched(
+            unwrap_model(model),
+            cfg,
+            mcts_cfg,
+            cfg.games_per_iteration,
+            device=cfg.device,
+            max_parallel=cfg.selfplay_batch_games,
+        )
+        print(
+            f"selfplay_batched iter={iteration} games={cfg.games_per_iteration} "
+            f"parallel={cfg.selfplay_batch_games} examples={len(examples)} "
+            f"elapsed={format_duration(time.monotonic() - start)} "
+            f"policy_entropy={stats['policy_entropy']:.3f}",
+            flush=True,
+        )
+        return examples, kl_surprises, lengths, stats
+
     if cfg.self_play_workers <= 1:
         examples: list[Example] = []
         kl_surprises: list[float] = []
@@ -2362,6 +2397,10 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--mcts-forced-playouts", dest="mcts_forced_playouts", action="store_true")
     parser.add_argument("--no-mcts-forced-playouts", dest="mcts_forced_playouts", action="store_false")
     parser.add_argument("--mcts-forced-playout-k", type=float, default=defaults.mcts_forced_playout_k)
+    parser.add_argument("--mcts-gumbel", dest="mcts_gumbel", action="store_true")
+    parser.add_argument("--no-mcts-gumbel", dest="mcts_gumbel", action="store_false")
+    parser.set_defaults(mcts_gumbel=defaults.mcts_gumbel)
+    parser.add_argument("--mcts-gumbel-considered", type=int, default=defaults.mcts_gumbel_considered)
     parser.add_argument(
         "--playout-cap-randomization", dest="playout_cap_randomization", action="store_true"
     )
@@ -2374,6 +2413,10 @@ def build_parser(defaults: TrainConfig) -> argparse.ArgumentParser:
     parser.add_argument("--no-selfplay-tree-reuse", dest="selfplay_tree_reuse", action="store_false")
     parser.add_argument("--selfplay-opening-moves", type=int, default=defaults.selfplay_opening_moves)
     parser.add_argument("--selfplay-opening-prob", type=float, default=defaults.selfplay_opening_prob)
+    parser.add_argument("--selfplay-batched", dest="selfplay_batched", action="store_true")
+    parser.add_argument("--no-selfplay-batched", dest="selfplay_batched", action="store_false")
+    parser.set_defaults(selfplay_batched=defaults.selfplay_batched)
+    parser.add_argument("--selfplay-batch-games", type=int, default=defaults.selfplay_batch_games)
     parser.add_argument("--policy-loss-weight", type=float, default=defaults.policy_loss_weight)
     parser.add_argument("--value-loss-weight", type=float, default=defaults.value_loss_weight)
     parser.add_argument("--learning-rate", type=float, default=defaults.learning_rate)

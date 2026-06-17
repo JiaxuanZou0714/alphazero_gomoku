@@ -21,6 +21,7 @@ if str(PACKAGE_PARENT) not in sys.path:
 
 from alphazero_gomoku.game import GomokuState
 from alphazero_gomoku.inference import mcts_config_from_cfg
+from alphazero_gomoku.mcts import MCTS
 from alphazero_gomoku.model import build_model_from_config, model_kwargs_from_config
 from alphazero_gomoku.torch_compat import tensor_from_array
 from alphazero_gomoku.train import TrainConfig
@@ -380,6 +381,15 @@ def parse_args() -> argparse.Namespace:
         default=default_path("outputs", "metrics", "distill-oldbest-128x8.jsonl"),
     )
     parser.add_argument("--device", default="auto")
+    parser.add_argument(
+        "--dataset-cache",
+        type=Path,
+        default=None,
+        help="Path to an .npz cache of teacher targets. If it exists, the teacher "
+        "generation step is skipped and the cached (states, masks, policies, values) "
+        "are loaded instead; otherwise the freshly generated dataset is written there. "
+        "Lets multiple student architectures distil from byte-identical targets.",
+    )
     parser.add_argument("--student-resume", type=Path, default=None)
     parser.add_argument("--seed", type=int, default=20260615)
     parser.add_argument("--board-size", type=int, default=10)
@@ -444,9 +454,30 @@ def main() -> None:
         f"student_arch={model_kwargs_from_config(asdict(cfg))}",
         flush=True,
     )
-    states, masks, policies, values, metadata = generate_distill_examples(
-        teacher, teacher_cfg, args, device=device
-    )
+    if args.dataset_cache is not None and args.dataset_cache.exists():
+        cached = np.load(args.dataset_cache)
+        states, masks, policies, values = (
+            cached["states"],
+            cached["masks"],
+            cached["policies"],
+            cached["values"],
+        )
+        metadata = {"examples": float(states.shape[0]), "cache": str(args.dataset_cache)}
+        print(f"distill_dataset_cache_hit path={args.dataset_cache} examples={states.shape[0]}", flush=True)
+    else:
+        states, masks, policies, values, metadata = generate_distill_examples(
+            teacher, teacher_cfg, args, device=device
+        )
+        if args.dataset_cache is not None:
+            args.dataset_cache.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(
+                args.dataset_cache,
+                states=states,
+                masks=masks,
+                policies=policies,
+                values=values,
+            )
+            print(f"distill_dataset_cache_write path={args.dataset_cache}", flush=True)
     print("distill_dataset " + json.dumps(metadata, sort_keys=True), flush=True)
     train_student(student, args, cfg, (states, masks, policies, values), device=device)
 

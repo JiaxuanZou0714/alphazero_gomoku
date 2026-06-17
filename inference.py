@@ -40,6 +40,12 @@ def mcts_config_from_cfg(
     if not for_eval:
         kwargs["forced_playouts"] = bool(cfg.get("mcts_forced_playouts", False))
         kwargs["forced_playout_k"] = float(cfg.get("mcts_forced_playout_k", 2.0))
+        # Gumbel is a self-play target-generation device; eval/head-to-head stays
+        # on deterministic visit-count play, so it is omitted when for_eval.
+        kwargs["gumbel"] = bool(cfg.get("mcts_gumbel", False))
+        kwargs["gumbel_considered"] = int(cfg.get("mcts_gumbel_considered", 16))
+        kwargs["gumbel_c_visit"] = float(cfg.get("mcts_gumbel_c_visit", 50.0))
+        kwargs["gumbel_c_scale"] = float(cfg.get("mcts_gumbel_c_scale", 1.0))
     return MCTSConfig(**kwargs)
 
 

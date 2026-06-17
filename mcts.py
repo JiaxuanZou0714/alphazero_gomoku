@@ -27,9 +27,16 @@ class MCTSConfig:
     fpu_reduction: float = 0.0       # unvisited child Q = parent Q - fpu * sqrt(visited prior mass)
     forced_playouts: bool = False    # minimum playouts for root children during noised searches
     forced_playout_k: float = 2.0    # n_forced = sqrt(k * prior * root_visits)
+    # Gumbel AlphaZero root planning (self-play only; used by the batched engine).
+    # Replaces Dirichlet + visit-count target with Gumbel-top-m + Sequential
+    # Halving and the softmax(logits + sigma(completedQ)) improved-policy target.
+    gumbel: bool = False
+    gumbel_considered: int = 16      # m: root actions entered into Sequential Halving
+    gumbel_c_visit: float = 50.0     # sigma scale: (c_visit + max_visit) * c_scale * q
+    gumbel_c_scale: float = 1.0
 
 
-@dataclass
+@dataclass(slots=True)
 class Node:
     prior: float
     raw_prior: float = 0.0          # prior before Dirichlet noise (for surprise weighting)
@@ -262,7 +269,10 @@ class MCTS:
         if not missing_states:
             return [result for result in results if result is not None]
 
-        self.model.eval()
+        # eval() walks every submodule; skip the redundant call when already in
+        # eval mode (self-play keeps the net in eval, so this fires ~never).
+        if self.model.training:
+            self.model.eval()
         encoded = tensor_from_array(
             np.stack([state.encode() for state in missing_states]),
             dtype=torch.float32,
