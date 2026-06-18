@@ -2143,9 +2143,9 @@ summary:focus-visible,
 .lb-val .lb-sub { font-size: 9.5px; color: var(--muted); margin-left: 4px; font-weight: 500; }
 .leaderboard .source { margin-top: 9px; }
 
-/* Training-curve panel: minimal hand-drawn SVG, flat aesthetic. Lives in a
- * full-width band (spanning board + side columns) so the labels stay legible. */
-.training-band { grid-column: 1 / -1; }
+/* Training-curve panel: minimal hand-drawn SVG, flat aesthetic. Sits under the
+ * board (board column) so it has the full board width — legible labels, no
+ * collision with the sticky side column. */
 .tc-chart { display: block; width: 100%; height: auto; max-height: 300px; margin-top: 4px; overflow: visible; }
 .tc-axis { stroke: var(--line); stroke-width: 1; }
 .tc-line { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
