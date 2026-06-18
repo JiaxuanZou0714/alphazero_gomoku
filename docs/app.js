@@ -54,7 +54,7 @@ const modelInputs = [...document.querySelectorAll("input[name='model']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 const archInputs = [...document.querySelectorAll("input[name='archModel']")];
 
-const APP_VERSION = "2026-06-18-v17";
+const APP_VERSION = "2026-06-18-v18";
 let state = null;
 let selectedSide = "white";
 let selectedModelId = "v6";
@@ -1029,8 +1029,9 @@ async function renderTrainingChart() {
   const note = document.getElementById("trainingNote");
   if (note && data.note) note.textContent = data.note;
 
-  const W = 600, H = 210, padL = 14, padR = 14, padT = 14, plotH = 122;
+  const W = 960, H = 210, padL = 16, padR = 16, padT = 14, plotH = 124;
   const plotW = W - padL - padR, x0 = padL, x1 = padL + plotW, yTop = padT, yBot = padT + plotH;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   const n = iters.length;
   const xAt = (i) => x0 + (i / (n - 1)) * plotW;
   const iterToX = (it) => {

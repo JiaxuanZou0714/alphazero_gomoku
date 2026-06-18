@@ -2143,17 +2143,19 @@ summary:focus-visible,
 .lb-val .lb-sub { font-size: 9.5px; color: var(--muted); margin-left: 4px; font-weight: 500; }
 .leaderboard .source { margin-top: 9px; }
 
-/* Training-curve panel: minimal hand-drawn SVG, flat aesthetic. */
-.tc-chart { display: block; width: 100%; height: auto; margin-top: 2px; overflow: visible; }
+/* Training-curve panel: minimal hand-drawn SVG, flat aesthetic. Lives in a
+ * full-width band (spanning board + side columns) so the labels stay legible. */
+.training-band { grid-column: 1 / -1; }
+.tc-chart { display: block; width: 100%; height: auto; max-height: 300px; margin-top: 4px; overflow: visible; }
 .tc-axis { stroke: var(--line); stroke-width: 1; }
 .tc-line { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
 .tc-line.acc { stroke: var(--accent-strong); }
 .tc-line.steel { stroke: var(--steel); }
 .tc-seam { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
-.tc-seam-label { fill: var(--muted); font-size: 10px; }
+.tc-seam-label { fill: var(--muted); font-size: 12px; }
 .tc-gate { fill: none; stroke: var(--steel); stroke-width: 1.4; }
 .tc-gate.promoted { fill: var(--accent); stroke: var(--accent); }
-.tc-gate-label, .tc-xlabel { fill: var(--muted); font-size: 10px; }
+.tc-gate-label, .tc-xlabel { fill: var(--muted); font-size: 12px; }
 .tc-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; }
 .tc-key { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
 .tc-key b { color: var(--body); font-variant-numeric: tabular-nums; font-weight: 700; }
