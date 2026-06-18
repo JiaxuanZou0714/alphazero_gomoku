@@ -958,11 +958,6 @@ summary:focus-visible,
   min-height: 56px;
 }
 
-/* v0 (the hand-written baseline) is the odd 5th option — span the full row so
- * the 2×2 grid of learned models stays balanced and v0 reads as the baseline. */
-.model-option:last-child {
-  grid-column: 1 / -1;
-}
 
 .model-option span,
 .model-option small {

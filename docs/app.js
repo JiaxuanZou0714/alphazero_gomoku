@@ -54,11 +54,11 @@ const modelInputs = [...document.querySelectorAll("input[name='model']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 const archInputs = [...document.querySelectorAll("input[name='archModel']")];
 
-const APP_VERSION = "2026-06-17-v15";
+const APP_VERSION = "2026-06-18-v16";
 let state = null;
 let selectedSide = "white";
-let selectedModelId = "v5";
-let selectedArchId = "v5"; // which model's structure the diagram shows (independent of the loaded model)
+let selectedModelId = "v6";
+let selectedArchId = "v6"; // which model's structure the diagram shows (independent of the loaded model)
 let overlayMode = "none";
 let busy = true;
 let cells = [];
@@ -941,7 +941,7 @@ async function analyze() {
 // (scripts/render_architecture.py — stacked feature-map volumes with ResNet
 // skip connections). Switching model just swaps the <img>; each figure bakes
 // in that model's channel/block counts.
-const ARCH_DIAGRAM_IDS = new Set(["v1", "v3", "v4", "v5"]);
+const ARCH_DIAGRAM_IDS = new Set(["v1", "v3", "v4", "v5", "v6"]);
 
 function initNetworkDiagram() {
   if (!networkDiagram) return;
@@ -1168,6 +1168,7 @@ const VERSION_TIMELINE = [
   { n: 17, date: "06-17", title: "v5：更小且 SOTA", desc: "蒸馏 v4 进 64×5（仅 ~65万参数）做 init，再用批量+Gumbel(96 sims)+损失重平衡+fresh cosine 做 RL，3080 约 3h 收敛（policy_top1 破 0.68 至 ~0.76）。", model: { tag: "默认", text: "🏆 v5-tiny-3080（新 SOTA）— 循环赛各 60 局对 v4 0.750 / v3 0.783 / v1 1.000，Elo 1607（v4 1426 / v3 1358 / v1 1000），fp16 仅 1.17MB，现为网页默认模型" } },
   { n: 18, date: "06-17", title: "网页棋力榜（Elo 柱状图）", desc: "新增「棋力榜」面板：循环赛 Bradley-Terry Elo 横向柱状图，直观对比 v1–v5 棋力；默认模型切换为 v5。" },
   { n: 19, date: "06-17", title: "v0：纯手写启发式基线 + 上榜", desc: "新增 v0——不带网络、不搜索的手写启发式（立即成五/挡五反射 + 一步威胁棋形评分），同一套打分在网页 worker 逐字镜像（399 局面 Python↔JS 100% 对齐），模型选择器加入 v0（秒载、无深算）。", model: { tag: "基线", text: "🎯 v0（手写启发式）— 各 30 局对 v1 1.000 / v3 0.683 / v4 0.633 / v5 0.283，固定 v1–v5 Elo 拟合得 Elo 1501，排名第 2，头对头反超 v4/v3，仅 v5 稳压。脚本 scripts/rate_v0.py 可复现。" } },
+  { n: 20, date: "06-18", title: "v6：纯 AlphaZero 更强一档", desc: "纯 AlphaZero（零先验、不增大网络）继续压榨 v5：诊断 v5 卡 0.757 是目标质量受限而非容量，故只加码自对弈搜索（sims 96→160、Gumbel considered 16→24、full_search 0.4→0.6）让目标更干净。warm-start v5 探 50 轮（v6@140 对 v5 0.817）未停滞，再续 100 轮到 iter 175。仍 64×5，网页 1.17MB 不变。注意 top1 因目标变软掉到 ~0.65 是假象，看实战与 value。", model: { tag: "默认", text: "🏆 v6（新 SOTA，网页默认）— 各 40 局对 v5 0.725 / v4 0.900 / v3 0.800 / v1 1.000 / v0 0.838，固定 v0–v5 Elo 拟合得 Elo 1751，登顶第 1。preset v6-tiny-3080/v6cont-3080、脚本 scripts/rate_v6.py 可复现。" } },
 ];
 
 function setupVersionsDialog() {

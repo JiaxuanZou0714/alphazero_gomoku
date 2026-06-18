@@ -1,6 +1,17 @@
 {
-  "defaultModel": "v5",
+  "defaultModel": "v6",
   "models": [
+    {
+      "id": "v6",
+      "label": "v6",
+      "manifest": "v6/manifest.json",
+      "iteration": 175,
+      "bytes": 1167491,
+      "arch": {
+        "channels": 64,
+        "residual_blocks": 5
+      }
+    },
     {
       "id": "v3",
       "label": "v3",
