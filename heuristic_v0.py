@@ -117,7 +117,6 @@ def score_moves(state: GomokuState) -> dict[int, float]:
     """
     board = state.board
     size = state.size
-    win = state.win_length
     player = state.current_player
     opponent = -player
     center = (size - 1) / 2.0

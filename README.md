@@ -69,21 +69,33 @@ self-play (MCTS)  ->  replay buffer  ->  train (policy+value)  ->  champion gate
 
 ## 当前状态
 
-正式 baseline（**通过 Git LFS 随仓库分发**，约 `115 MB`）：
+**当前最强 / 网页默认：`v6`**（`64x5`，约 `65 万`参数，fp16 ONNX 仅 `1.17 MB`）：
 
 ```text
-outputs/checkpoints/v1-old-best/gomoku10_best.pt
+outputs/checkpoints/v6cont-3080/gomoku10_best.pt
 ```
 
-`v1-old-best` 历史目录名曾是 `a100-4-prod-v3`，现已重命名以消除“看着像 v3、其实是 v1”的混淆。晋升的是第 `95` 轮的 best（共训 `100` 轮）。
+### 棋力榜（循环赛 Elo · `128 sims` · 颜色互换）
 
-当前主线 v3：从蒸馏得到的 `128x8` student 出发再做大规模 self-play RL，通过内部 gate 的 best（第 `90` 轮，不是最后保存的 `iter_0096.pt`）：
+固定既有评分、对每个新模型做单维最大似然拟合，统一在同一把尺子上（数据：`docs/assets/leaderboard.json`，网页有柱状图）：
 
-```text
-outputs/checkpoints/v3-student-local/gomoku10_best.pt
-```
+| 排名 | 模型 | 架构 | Elo |
+|---|---|---|---|
+| 1 | **v6** | `64x5` | **1751** |
+| 2 | v5 | `64x5` | 1607 |
+| 3 | **v0** | 手写启发式（无网络） | 1501 |
+| 4 | v4 | `128x8` | 1426 |
+| 5 | v3 | `128x8` | 1358 |
+| 6 | v1 / old best | `192x12` | 1000 |
 
-最新对 old best 的 `128 sims` 复核为 `54-10-0`（score `0.84375`），已明显强于 v1 的 `128 sims` 设置。各版本的完整结果、数字与晋升判据统一记录在 [docs/VERSION_HISTORY.md](docs/VERSION_HISTORY.md)，本文不再重复。
+模型谱系（每一档的目标、改动、完整数字见 [docs/VERSION_HISTORY.md](docs/VERSION_HISTORY.md)）：
+
+- **v1 / old best**（`192x12`，A100 训 `100` 轮，best=第 `95` 轮）——正式基线。历史目录名曾是 `a100-4-prod-v3`，已重命名以消除混淆。
+- **v3**（`128x8`）——old best 蒸馏出 student 后大规模 self-play RL，best=第 `90` 轮，曾为网页默认。
+- **v4**（`128x8`）——warm-start v3 + ownership/EMA/开局多样化，与 v3 持平但黑白更均衡。
+- **v5**（`64x5`）——蒸馏 v4 进小网做 init，再用批量自对弈 + Gumbel MCTS + 损失重平衡做 RL，**用 5× 更小的网全面反超 v4**，曾为 SOTA。
+- **v6**（`64x5`）——**纯 AlphaZero**（零先验、不增大网络）继续压榨 v5：诊断 v5 的瓶颈是目标质量而非容量，于是只加码自对弈搜索（`sims 96→160`、Gumbel `considered 16→24`、`full_search 0.4→0.6`）让目标更干净，warm-start v5 续训。对 v5 `0.725`、对 v4 `0.900`，**新 SOTA**。
+- **v0**（`heuristic_v0.py`）——完全不带网络、不搜索的手写启发式（成五/挡五反射 + 一步威胁棋形评分）。同一套打分在 `docs/engine.worker.js` 逐字镜像，网页可直接对战。它在 `128 sims` 下头对头反超 v3/v4，是“学习模型到底强在哪”的最好参照（评分脚本 `scripts/rate_v0.py` / `scripts/rate_v6.py` 可复现）。
 
 ## 训练
 
@@ -96,11 +108,16 @@ python -m alphazero_gomoku.train --preset <preset> [--device cuda] [其它覆盖
 | preset | 用途 |
 |--------|------|
 | `local` | 极小配置，本地冒烟测试整条流程 |
+| `v6cont-3080` | **当前最强**：从 v6 best 续训（同配方加码自对弈搜索的延续）|
+| `v6-tiny-3080` | 纯 AlphaZero 续 v5：warm-start v5 + `sims 96→160` / Gumbel `considered 24` / `full_search 0.6` |
+| `v5-tiny-3080` | 蒸馏 v4 进 `64x5` 做 init，再用批量自对弈 + Gumbel + 损失重平衡做 RL |
 | `v4-student-3080` | warm-start v3 + ownership/EMA/开局多样化，本地 3080 续训（与 v3 持平、色彩更均衡） |
-| `v3-student-local` | 当前主线：从 128x8 student 起步做 RL |
+| `v3-student-local` | 从 `128x8` student 起步做 RL（v3 主线） |
 | `v3-local` | 从 old best 直接继续 RL（归档复现路线） |
 | `v2` | 长训续训实验（已判失败，保留复现） |
 | `a100-4` / `a100-prod` / `a100-fast` / `a100-turbo` | 不同规模/时长的 A100 配置 |
+
+> v0 不是训练 preset——它是 `heuristic_v0.py` 里的纯手写引擎，无需训练。
 
 任意字段都可用命令行覆盖（如 `--simulations`、`--self-play-workers`、`--eval-interval`）。多 worker self-play / eval 在所有平台都走进程隔离（spawn），保证真并行且每个 worker 的随机种子独立。
 
@@ -138,7 +155,19 @@ python scripts/plot_training_metrics.py \
 
 ![v4 training overview](outputs/plots/v4-student-3080/metrics_overview.png)
 
-v4 是 v3（`128x8`）的 warm-start 续训，打开 ownership 辅助头 + EMA-of-weights + bf16 AMP，并用开局多样化（`selfplay_opening_*`）让自我对弈不再总从空盘开始。本地 3080 训到第 `56` 轮在平台期停住，best = 第 `35` 轮 EMA 快照。诊断要点：因为 warm-start，曲线一开始就接近收敛（不像从零训那样有长前摇）；右下自我对弈黑/白胜率收敛到约 `0.58 / 0.42`，比 v3 的 `0.69 / 0.31` 更均衡——这是开局多样化带来的鲁棒性，**不是**消除了五子棋固有的先手优势。head-to-head 与 v3 持平（`33-27-0`，score `0.550`），故 v3 仍是网页默认，v4 作为可选项发布。
+v4 是 v3（`128x8`）的 warm-start 续训，打开 ownership 辅助头 + EMA-of-weights + bf16 AMP，并用开局多样化（`selfplay_opening_*`）让自我对弈不再总从空盘开始。本地 3080 训到第 `56` 轮在平台期停住，best = 第 `35` 轮 EMA 快照。诊断要点：因为 warm-start，曲线一开始就接近收敛（不像从零训那样有长前摇）；右下自我对弈黑/白胜率收敛到约 `0.58 / 0.42`，比 v3 的 `0.69 / 0.31` 更均衡——这是开局多样化带来的鲁棒性，**不是**消除了五子棋固有的先手优势。head-to-head 与 v3 持平（`33-27-0`，score `0.550`）。
+
+### v5 / 蒸馏小网 + 批量自对弈 + Gumbel
+
+![v5 training overview](outputs/plots/v5-tiny-3080/metrics_overview.png)
+
+v5 把 v4 蒸馏进 `64x5`（仅 `~65 万`参数）做 init，再用批量跨对局自对弈（单卡约 `6×`）+ Gumbel 改进策略目标 + 损失重平衡做 RL。诊断要点：`policy_top1` 突破了 v3/v4 卡住的 `0.68`，稳定到 `~0.76`——证明 v3/v4 的平台期是**目标质量**受限而非容量。
+
+### v6 / 纯 AlphaZero 加码搜索（当前 SOTA）
+
+![v6 training overview](outputs/plots/v6-3080/metrics_overview.png)
+
+v6 warm-start v5，只把自对弈搜索调强（`sims 96→160`、Gumbel `considered 16→24`、`full_search 0.4→0.6`），让 Gumbel 目标更干净、更少漏战术。曲线含两段（`v6-tiny` 探针 `96→140` + `v6cont` 续训 `141→187`，第 `140` 轮可见 warm-start 接缝）。诊断要点：**别看 `policy_top1`**——`considered` 调大让目标变软（`target_entropy` 从 `0.69` 升到 `~1.05`），`top1` 机械性掉到 `~0.65` 是假象；真实信号是 `value_acc` 持续上升、`policy_kl` 持续下降，以及对 champion 的实战 gate 链式晋升。最终对 v5 `0.725`、对 v4 `0.900`，登顶 Elo `1751`。
 
 ## 测试
 
@@ -183,7 +212,7 @@ python scripts/benchmark_checkpoints.py \
 
 ## GitHub Pages 静态页面
 
-`docs/` 是纯静态页面（无 Python 后端），用 onnxruntime-web 在浏览器里跑模型，可在页面切换对战 `v3 student`（默认）、`v4 student` 或 `v1 / old best`。模型按 `docs/assets/models/<id>/` 统一存放，分块文件 + `manifest.json` 由 `catalog.json` 索引（`defaultModel` 决定默认加载哪个）。
+`docs/` 是纯静态页面（无 Python 后端），用 onnxruntime-web 在浏览器里跑模型，可在页面切换对战 `v6`（默认）、`v5`、`v4`、`v3`、`v1`，以及纯手写启发式 `v0`（无权重、秒载）。模型按 `docs/assets/models/<id>/` 统一存放，分块文件 + `manifest.json` 由 `catalog.json` 索引（`defaultModel` 决定默认加载哪个）。页面还内置棋力榜柱状图（`docs/assets/leaderboard.json`）。
 
 导出一个模型（`--out-dir` 省略时自动推导为 `docs/assets/models/<model-id>`）：
 

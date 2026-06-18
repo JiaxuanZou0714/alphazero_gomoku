@@ -91,7 +91,9 @@ def play_vs_v0(v6, v6_cfg, *, sims, games, opening_moves, seed, device):
             if state.current_player == v6_player:
                 action = greedy_action(v6, v6_mcfg, state, device)
             else:
-                action = select_move(state, rng)
+                # Deterministic (rng=None) so v0 plays EXACTLY the browser engine;
+                # variety comes from random openings.
+                action = select_move(state, None)
             state = state.apply(action)
         if state.winner == 0:
             draws += 1
@@ -120,7 +122,7 @@ def fit_rating(results: dict[str, dict], opp_elo: dict[str, float]) -> float:
             total -= n * (score * math.log(e) + (1 - score) * math.log(1 - e))
         return total
 
-    seed = min(range(0, 3001, 5), key=nll)
+    seed = min(range(0, 4001, 5), key=nll)
     lo, hi = seed - 5.0, seed + 5.0
     for _ in range(60):
         m1, m2 = lo + (hi - lo) / 3, hi - (hi - lo) / 3

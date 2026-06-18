@@ -54,7 +54,7 @@ const modelInputs = [...document.querySelectorAll("input[name='model']")];
 const overlayInputs = [...document.querySelectorAll("input[name='overlay']")];
 const archInputs = [...document.querySelectorAll("input[name='archModel']")];
 
-const APP_VERSION = "2026-06-18-v16";
+const APP_VERSION = "2026-06-18-v17";
 let state = null;
 let selectedSide = "white";
 let selectedModelId = "v6";
@@ -455,7 +455,9 @@ function renderRecommendation() {
   recPolicy.textContent = pct(selected.prior, 1);
   recWin.textContent = selectedWin === null ? "-" : pct(selectedWin);
   recommendationMain.textContent = `下在 ${selectedMove}`;
-  recommendationWhy.textContent = `本次 ${a.requestedSimulations || a.simulations} 次模拟。访问最多的分支就是 MCTS 最后最认可的选择。`;
+  recommendationWhy.textContent = a.engine === "heuristic"
+    ? "v0 不搜索：直接取一步威胁评分最高的落点（占比为各候选的启发式权重）。"
+    : `本次 ${a.requestedSimulations || a.simulations} 次模拟。访问最多的分支就是 MCTS 最后最认可的选择。`;
 }
 
 function renderCandidates() {
@@ -1002,6 +1004,90 @@ async function renderLeaderboard() {
   }));
 }
 
+// Minimal training-curve panel: two self-normalized lines (value accuracy rising,
+// policy KL falling) over the v6 RL run, plus the champion-gate promotion dots.
+// Data is a ~3KB JSON exported from the training metrics; the chart is hand-drawn
+// SVG to match the flat aesthetic (no chart library).
+async function renderTrainingChart() {
+  const svg = document.getElementById("trainingChart");
+  if (!svg) return;
+  const panel = svg.closest(".panel");
+  let data;
+  try {
+    const res = await fetch(`./assets/training/v6.json?v=${APP_VERSION}`, { cache: "no-cache" });
+    if (!res.ok) throw new Error(String(res.status));
+    data = await res.json();
+  } catch (_e) {
+    if (panel) panel.hidden = true; // no curve data → drop the panel silently
+    return;
+  }
+  const iters = data.iters || [];
+  if (iters.length < 2) { if (panel) panel.hidden = true; return; }
+
+  const tag = document.getElementById("trainingTag");
+  if (tag) tag.textContent = data.elo ? `Elo ${data.elo}` : (data.arch || "");
+  const note = document.getElementById("trainingNote");
+  if (note && data.note) note.textContent = data.note;
+
+  const W = 600, H = 210, padL = 14, padR = 14, padT = 14, plotH = 122;
+  const plotW = W - padL - padR, x0 = padL, x1 = padL + plotW, yTop = padT, yBot = padT + plotH;
+  const n = iters.length;
+  const xAt = (i) => x0 + (i / (n - 1)) * plotW;
+  const iterToX = (it) => {
+    let idx = iters.indexOf(it);
+    if (idx < 0) { let best = Infinity; iters.forEach((v, j) => { const d = Math.abs(v - it); if (d < best) { best = d; idx = j; } }); }
+    return xAt(idx);
+  };
+  const norm = (arr) => {
+    const lo = Math.min(...arr), hi = Math.max(...arr), span = (hi - lo) || 1;
+    return (v) => yBot - ((v - lo) / span) * plotH;
+  };
+
+  svg.replaceChildren();
+  svg.appendChild(svgEl("line", { class: "tc-axis", x1: x0, y1: yBot, x2: x1, y2: yBot }));
+
+  if (data.seam && data.seam >= iters[0] && data.seam <= iters[n - 1]) {
+    const sx = iterToX(data.seam);
+    svg.appendChild(svgEl("line", { class: "tc-seam", x1: sx, y1: yTop, x2: sx, y2: yBot }));
+    const lbl = svgEl("text", { class: "tc-seam-label", x: sx + 4, y: yTop + 9 });
+    lbl.textContent = "续训接缝";
+    svg.appendChild(lbl);
+  }
+
+  const series = [
+    { key: "value_acc", cls: "acc", label: "value 准确率 ↑" },
+    { key: "policy_kl", cls: "steel", label: "policy KL ↓" },
+  ];
+  const legendParts = [];
+  series.forEach((s) => {
+    const arr = data.series && data.series[s.key];
+    if (!arr || arr.length !== n) return;
+    const y = norm(arr);
+    const pts = arr.map((v, i) => `${xAt(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    svg.appendChild(svgEl("polyline", { class: `tc-line ${s.cls}`, points: pts }));
+    legendParts.push(`<span class="tc-key ${s.cls}">${s.label} <b>${arr[arr.length - 1].toFixed(3)}</b></span>`);
+  });
+
+  const gates = data.gates || [];
+  const gy = yBot + 24;
+  gates.forEach((g) => {
+    svg.appendChild(svgEl("circle", { class: `tc-gate ${g.promoted ? "promoted" : ""}`, cx: iterToX(g.iter), cy: gy, r: 3.4 }));
+  });
+  const promoted = gates.filter((g) => g.promoted).length;
+  if (gates.length) {
+    const gl = svgEl("text", { class: "tc-gate-label", x: x0, y: gy + 20 });
+    gl.textContent = `champion gate（每 5 轮）：${promoted}/${gates.length} 次晋升 · ● 晋升 ○ 未过`;
+    svg.appendChild(gl);
+    legendParts.push(`<span class="tc-key gate">${promoted}/${gates.length} 次晋升</span>`);
+  }
+  const xl = svgEl("text", { class: "tc-xlabel", x: x1, y: gy + 20, "text-anchor": "end" });
+  xl.textContent = `iter ${iters[0]}–${iters[n - 1]}`;
+  svg.appendChild(xl);
+
+  const legend = document.getElementById("trainingLegend");
+  if (legend) legend.innerHTML = legendParts.join("");
+}
+
 function setOverlay(mode) {
   overlayMode = mode;
   syncOverlayButtons();
@@ -1106,6 +1192,7 @@ function populateModelLabels(catalog) {
 async function boot() {
   registerServiceWorker();
   renderLeaderboard();
+  renderTrainingChart();
   const catalog = await loadCatalogForSelector();
   if (catalog) {
     populateModelLabels(catalog);

@@ -2142,3 +2142,24 @@ summary:focus-visible,
 .lb-val { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font-size: 11px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: .2px; }
 .lb-val .lb-sub { font-size: 9.5px; color: var(--muted); margin-left: 4px; font-weight: 500; }
 .leaderboard .source { margin-top: 9px; }
+
+/* Training-curve panel: minimal hand-drawn SVG, flat aesthetic. */
+.tc-chart { display: block; width: 100%; height: auto; margin-top: 2px; overflow: visible; }
+.tc-axis { stroke: var(--line); stroke-width: 1; }
+.tc-line { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.tc-line.acc { stroke: var(--accent-strong); }
+.tc-line.steel { stroke: var(--steel); }
+.tc-seam { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+.tc-seam-label { fill: var(--muted); font-size: 10px; }
+.tc-gate { fill: none; stroke: var(--steel); stroke-width: 1.4; }
+.tc-gate.promoted { fill: var(--accent); stroke: var(--accent); }
+.tc-gate-label, .tc-xlabel { fill: var(--muted); font-size: 10px; }
+.tc-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; }
+.tc-key { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
+.tc-key b { color: var(--body); font-variant-numeric: tabular-nums; font-weight: 700; }
+.tc-key::before { content: ""; width: 12px; height: 2.5px; border-radius: 2px; background: currentColor; }
+.tc-key.acc { color: var(--accent-strong); }
+.tc-key.steel { color: var(--steel); }
+.tc-key.gate { color: var(--muted); }
+.tc-key.gate::before { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.training .source { margin-top: 9px; }

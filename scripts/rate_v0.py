@@ -53,7 +53,9 @@ def play_vs_model(model, cfg, *, sims, games, opening_moves, seed, device):
         v0_player = 1 if game_index % 2 == 0 else -1
         while not state.is_terminal:
             if state.current_player == v0_player:
-                action = select_move(state, rng)
+                # Deterministic (rng=None) so the rated engine plays EXACTLY the
+                # browser's v0Evaluate; game variety comes from random openings.
+                action = select_move(state, None)
             else:
                 action = greedy_action(model, mcfg, state, device)
             state = state.apply(action)
@@ -91,7 +93,7 @@ def fit_rating(results: dict[str, dict], opp_elo: dict[str, float]) -> float:
             total -= n * (score * math.log(e) + (1 - score) * math.log(1 - e))
         return total
 
-    seed = min(range(0, 3001, 5), key=nll)
+    seed = min(range(0, 4001, 5), key=nll)
     lo, hi = seed - 5.0, seed + 5.0
     for _ in range(60):
         m1, m2 = lo + (hi - lo) / 3, hi - (hi - lo) / 3

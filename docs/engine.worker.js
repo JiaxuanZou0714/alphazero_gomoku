@@ -842,7 +842,7 @@ function terminalEvaluation(state, elapsedMs = 0) {
   };
 }
 
-function rootEvaluation(analysis, state, source = "mcts") {
+function rootEvaluation(analysis, state, source = analysis.engine === "heuristic" ? "heuristic" : "mcts") {
   const blackWinProb = analysis.player === 1 ? analysis.winProb : 1 - analysis.winProb;
   return {
     key: stateKey(state),
@@ -860,10 +860,13 @@ function rootEvaluation(analysis, state, source = "mcts") {
 }
 
 function childEvaluation(analysis, action, stateAfterMove) {
+  // The heuristic engine does no MCTS, so its evaluations must be labelled
+  // "heuristic" (not "mcts") for the UI source line / sims stat.
+  const source = analysis.engine === "heuristic" ? "heuristic" : "mcts";
   if (stateAfterMove.winner !== null) {
     return {
       ...terminalEvaluation(stateAfterMove, analysis.elapsedMs),
-      source: "mcts",
+      source,
       simulations: analysis.simulations,
     };
   }
@@ -877,7 +880,7 @@ function childEvaluation(analysis, action, stateAfterMove) {
   const blackWinProb = analysis.player === 1 ? rootWinProb : 1 - rootWinProb;
   return {
     key: stateKey(stateAfterMove),
-    source: "mcts",
+    source,
     player: stateAfterMove.currentPlayer,
     moveNumber: stateAfterMove.movesPlayed,
     lastMove: stateAfterMove.lastMove,
