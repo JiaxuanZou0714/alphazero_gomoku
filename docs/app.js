@@ -293,6 +293,32 @@ function buildBoard(size) {
   }
 }
 
+// The set of board indices forming the winning five (or null). Derived in the UI
+// from the final stone — the engine only exposes `winner`, not the line itself.
+function winningCells() {
+  if (!state || state.winner === null || state.winner === 0 || state.lastMove === null) return null;
+  const size = state.size;
+  const need = state.winLength || 5;
+  const r0 = Math.floor(state.lastMove / size);
+  const c0 = state.lastMove % size;
+  const player = state.board[r0][c0];
+  if (!player) return null;
+  for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+    const line = [[r0, c0]];
+    for (const sgn of [1, -1]) {
+      let r = r0 + dr * sgn;
+      let c = c0 + dc * sgn;
+      while (r >= 0 && r < size && c >= 0 && c < size && state.board[r][c] === player) {
+        line.push([r, c]);
+        r += dr * sgn;
+        c += dc * sgn;
+      }
+    }
+    if (line.length >= need) return new Set(line.map(([r, c]) => r * size + c));
+  }
+  return null;
+}
+
 function renderBoard() {
   const size = state.size;
   const last = state.lastMove === null ? null : {
@@ -300,6 +326,11 @@ function renderBoard() {
     col: state.lastMove % size,
   };
   const isHumanTurn = !state.winner && state.currentPlayer === state.humanPlayer;
+  const winSet = winningCells();
+
+  // Drives the colour of the hover ghost-stone and the game-over dimming.
+  boardEl.dataset.human = state.humanPlayer === 1 ? "black" : "white";
+  boardEl.classList.toggle("over", !!winSet);
 
   cells.forEach((cell, idx) => {
     const row = Math.floor(idx / size);
@@ -315,6 +346,12 @@ function renderBoard() {
     }
     if (!isHumanTurn || value !== 0 || busy) cell.classList.add("disabled");
     if (last && row === last.row && col === last.col) cell.classList.add("last");
+    if (winSet && winSet.has(idx)) {
+      cell.classList.add("win");
+      const ring = document.createElement("span");
+      ring.className = "win-ring";
+      cell.appendChild(ring);
+    }
   });
   paintOverlays();
 }
