@@ -41,7 +41,6 @@
   --accent-soft: #e4f1f8;
   --accent-wash: rgba(44, 110, 143, 0.1);
   --accent-2: #3f7d99;
-  --accent-grad: var(--accent); /* flattened — any background:var(--accent-grad) is now solid */
   --cta: #1a1a19; /* primary call-to-action = solid ink */
 
   /* Semantic. Slate for AI/policy ghosts; muted amber strictly on-board. */
@@ -74,7 +73,6 @@
   --shadow: 0 1px 2px rgba(20, 18, 15, 0.04);
   --shadow-soft: 0 1px 2px rgba(20, 18, 15, 0.03);
   --shadow-pop: 0 12px 40px rgba(20, 18, 15, 0.12);
-  --glow-accent: 0 0 0 1px rgba(44, 110, 143, 0.22);
   --glow-board: 0 1px 2px rgba(20, 18, 15, 0.05), 0 10px 28px rgba(20, 18, 15, 0.06);
 
   /* Typography — editorial serif display, geometric sans UI, technical mono meta. */
@@ -96,6 +94,15 @@ html {
   min-height: 100%;
   background: var(--bg);
   scroll-behavior: smooth;
+  /* Thin editorial scrollbars — inherited, so one source covers every scroll
+     pane; unsupported browsers fall back to the native bar. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
 
 /* Warm bone canvas — the paper the whole studio is printed on. Body text is
