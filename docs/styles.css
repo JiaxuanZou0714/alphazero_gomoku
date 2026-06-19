@@ -40,7 +40,7 @@
   --accent-strong: #1e5573;
   --accent-soft: #e4f1f8;
   --accent-wash: rgba(44, 110, 143, 0.1);
-  --accent-2: #3c8aa0;
+  --accent-2: #3f7d99;
   --accent-grad: var(--accent); /* flattened — any background:var(--accent-grad) is now solid */
   --cta: #1a1a19; /* primary call-to-action = solid ink */
 
@@ -123,6 +123,18 @@ body::before {
   background: radial-gradient(120% 70% at 50% -16%, rgba(198, 143, 73, 0.05), transparent 56%);
 }
 
+/* Fixed grain overlay — a barely-there paper tooth that breaks the flat-white
+   sterility. pointer-events:none + z-index:-1 keep it inert, behind all content. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
 button,
 input,
 fieldset {
@@ -140,6 +152,28 @@ fieldset {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* Keyboard skip-link — off-screen until focused, then slides into the top-left. */
+.skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 50;
+  transform: translateY(-150%);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 10px 16px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: var(--shadow);
+  transition: transform var(--dur) var(--ease-out);
+}
+
+.skip-link:focus {
+  transform: none;
 }
 
 /* Base button = safe neutral resets; the loud primary identity lives on the
@@ -295,6 +329,7 @@ summary:focus-visible,
   line-height: 1.02;
   font-weight: 500;
   letter-spacing: -0.03em;
+  text-wrap: balance;
   color: var(--ink);
 }
 
@@ -847,6 +882,7 @@ summary:focus-visible,
 
 .side-pane .panel:hover {
   border-color: var(--line-strong);
+  box-shadow: 0 2px 8px rgba(20, 18, 15, 0.04);
 }
 
 .controls {
